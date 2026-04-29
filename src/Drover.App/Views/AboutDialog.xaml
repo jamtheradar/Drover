@@ -1,0 +1,76 @@
+<Window x:Class="Drover.App.Views.AboutDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="About Drover"
+        Width="460" Height="380"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{StaticResource Chrome.Background}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="28,28,28,0">
+            <StackPanel Orientation="Horizontal">
+                <Image Source="pack://application:,,,/Resources/Icons/drover-idle.ico"
+                       Width="48" Height="48" VerticalAlignment="Center" />
+                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="Drover" FontSize="22"
+                               Foreground="{StaticResource Chrome.Text}"
+                               FontWeight="SemiBold" />
+                    <TextBlock x:Name="VersionText" FontSize="11"
+                               Foreground="{StaticResource Chrome.TextMuted}" />
+                </StackPanel>
+            </StackPanel>
+
+            <TextBlock Margin="0,18,0,0" TextWrapping="Wrap"
+                       Foreground="{StaticResource Chrome.Text}" FontSize="12">
+                Mission control for Claude Code. Hosts multiple sessions in tabs alongside
+                a project library, dashboard, plan / task panels, and a markdown memory editor.
+            </TextBlock>
+
+            <TextBlock Margin="0,18,0,0" Foreground="{StaticResource Chrome.TextMuted}"
+                       FontSize="11">
+                Windows 10 19041+ · .NET 10 · x64 · ConPTY-backed terminal.
+            </TextBlock>
+
+            <StackPanel Margin="0,18,0,0">
+                <Button Content="View what's new"
+                        Click="WhatsNew_Click"
+                        HorizontalAlignment="Left"
+                        Padding="0" Margin="0,0,0,6"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Foreground="{StaticResource Chrome.Text}"
+                        Cursor="Hand" />
+                <Button x:Name="UpdateButton"
+                        Content="Check for updates"
+                        Click="CheckForUpdates_Click"
+                        HorizontalAlignment="Left"
+                        Padding="0" Margin="0,0,0,6"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Foreground="{StaticResource Chrome.Text}"
+                        Cursor="Hand" />
+                <TextBlock x:Name="UpdateStatusText" FontSize="11"
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           Margin="0,0,0,6" />
+                <TextBlock x:Name="BuildText" FontSize="10"
+                           Foreground="{StaticResource Chrome.TextMuted}" />
+            </StackPanel>
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,1,0,0" Padding="16,10">
+            <Button Content="Close"
+                    Click="Close_Click"
+                    HorizontalAlignment="Right"
+                    Padding="14,5"
+                    IsDefault="True" IsCancel="True" />
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,59 @@
+<Window x:Class="Drover.App.Views.CheatSheetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Claude Code cheat sheet"
+        Width="900" Height="780"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Chrome.Background}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,0,1" Padding="20,12">
+            <DockPanel LastChildFill="True">
+                <TextBox DockPanel.Dock="Right"
+                         x:Name="SearchBox"
+                         Width="260"
+                         Padding="8,6"
+                         FontSize="12"
+                         VerticalAlignment="Center"
+                         TextChanged="Search_Changed"
+                         PreviewKeyDown="Search_PreviewKeyDown" />
+                <TextBlock DockPanel.Dock="Right"
+                           Text="Filter"
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           FontSize="11"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <StackPanel>
+                    <TextBlock Text="Claude Code cheat sheet" FontSize="18"
+                               Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold" />
+                    <TextBlock Text="Shortcuts, slash commands, MCP, hooks, CLI flags."
+                               Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                               Margin="0,2,0,0" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <FlowDocumentScrollViewer Grid.Row="1"
+                                  x:Name="Viewer"
+                                  Padding="24,16"
+                                  Background="Transparent"
+                                  IsToolBarVisible="False"
+                                  VerticalScrollBarVisibility="Auto" />
+
+        <Border Grid.Row="2" Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,1,0,0" Padding="14,8">
+            <TextBlock x:Name="StatusLine"
+                       Text="Esc to close · type to filter sections"
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       FontSize="11" />
+        </Border>
+    </Grid>
+</Window>

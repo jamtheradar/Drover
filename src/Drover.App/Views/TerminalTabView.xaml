@@ -1,0 +1,341 @@
+<UserControl x:Class="Drover.App.Views.TerminalTabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:term="clr-namespace:Drover.App.Terminal"
+             xmlns:svc="clr-namespace:Drover.App.Services"
+             Loaded="UserControl_Loaded">
+    <Grid Background="{StaticResource Chrome.Background}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Per-tab status strip — VS-style: panel background, accent stripe under, ~44px tall.
+             Three regions: model+effort badges (primary), project path (centre), live metrics (right). -->
+        <Border Grid.Row="0"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,0,1"
+                Padding="14,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: model + effort badges -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#2c3a48" CornerRadius="3" Padding="8,3" Margin="0,0,6,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Active model (display name pushed by Claude Code's statusLine, falls back to id from transcript).">
+                        <TextBlock Text="{Binding ModelText, FallbackValue='—'}"
+                                   Foreground="#cfe7ff" FontSize="12" FontWeight="SemiBold">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ModelText}" Value="">
+                                            <Setter Property="Text" Value="no model" />
+                                            <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Border>
+                    <Border CornerRadius="3" Padding="8,3" Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Reasoning effort detected from the latest assistant turn (matches /effort levels).">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Setter Property="Background" Value="#3a2f47" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding EffortText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding EffortText}" Value="max">
+                                        <Setter Property="Background" Value="#5a2a4a" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding EffortText}" Value="xhigh">
+                                        <Setter Property="Background" Value="#4a2a4a" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding EffortText}"
+                                   Foreground="#e0c8f0" FontSize="12" FontWeight="SemiBold" />
+                    </Border>
+                </StackPanel>
+
+                <!-- Centre: project + path -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                            Margin="4,0,12,0">
+                    <TextBlock Text="{Binding Project.Name}"
+                               Foreground="{StaticResource Chrome.Text}"
+                               FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Project.Path, StringFormat=' · {0}'}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="11" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <!-- Right: live metrics — context (primary), cost (secondary), attention -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- Context: label + raw token count + muted percent.
+                         Tokens come from transcript polling; percent comes from
+                         CC's statusLine push (context_window.used_percentage). -->
+                    <Border CornerRadius="4" Padding="10,5" Margin="0,0,6,0"
+                            Background="#1b1b1c"
+                            BorderBrush="{StaticResource Chrome.Border}"
+                            BorderThickness="1"
+                            VerticalAlignment="Center"
+                            ToolTip="Context window usage. Tokens from transcript; % from statusLine push.">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Context" Foreground="{StaticResource Chrome.TextMuted}"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding ContextTokens, StringFormat='{}{0:N0}', FallbackValue='—'}"
+                                       Foreground="{StaticResource Chrome.Text}"
+                                       FontSize="16" FontWeight="SemiBold"
+                                       VerticalAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ContextTokens}" Value="0">
+                                                <Setter Property="Text" Value="—" />
+                                                <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding ContextPercentSubText, StringFormat=' · {0}'}"
+                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                       FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ContextPercentSubText}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Worktree branch (statusLine: worktree.branch) -->
+                    <Border CornerRadius="3" Padding="6,2" Margin="0,0,6,0"
+                            Background="#1f2c1f"
+                            VerticalAlignment="Center"
+                            ToolTip="Git branch reported by statusLine.">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CcWorktreeBranch}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding CcWorktreeBranch, StringFormat='⎇ {0}'}"
+                                   Foreground="#a8d8a8" FontSize="11" FontWeight="SemiBold" />
+                    </Border>
+
+                    <!-- Lines added/removed (statusLine: cost.total_lines_added/removed) -->
+                    <TextBlock Text="{Binding LinesText}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"
+                               ToolTip="Lines added / removed this session.">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding LinesText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- 5-hour rate limit (statusLine: rate_limits.five_hour) -->
+                    <Border CornerRadius="3" Padding="6,2" Margin="0,0,4,0"
+                            Background="#2a2a3a"
+                            VerticalAlignment="Center"
+                            ToolTip="5-hour rate limit usage and reset time (from statusLine).">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RateLimit5hText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding RateLimit5hText}" Foreground="#c8c8e0" FontSize="11" />
+                    </Border>
+
+                    <!-- 7-day rate limit (statusLine: rate_limits.seven_day) -->
+                    <Border CornerRadius="3" Padding="6,2" Margin="0,0,8,0"
+                            Background="#2a2a3a"
+                            VerticalAlignment="Center"
+                            ToolTip="7-day rate limit usage and reset time (from statusLine).">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RateLimit7dText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding RateLimit7dText}" Foreground="#c8c8e0" FontSize="11" />
+                    </Border>
+
+                    <!-- Output style (statusLine: output_style.name) -->
+                    <TextBlock Text="{Binding CcOutputStyle, StringFormat='style: {0}'}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"
+                               ToolTip="Active output style.">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CcOutputStyle}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- Vim mode (statusLine: vim.mode) -->
+                    <Border CornerRadius="3" Padding="5,1" Margin="0,0,8,0"
+                            Background="#3a2c1f" VerticalAlignment="Center"
+                            ToolTip="Vim mode (from statusLine).">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CcVimMode}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding CcVimMode}" Foreground="#e0c0a0" FontSize="10" FontWeight="SemiBold" />
+                    </Border>
+
+                    <!-- Hook badge (moved to right cluster). -->
+                    <Border CornerRadius="3" Padding="6,2" Margin="0,0,8,0"
+                            VerticalAlignment="Center">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#3a2a2a" />
+                                <Setter Property="ToolTip" Value="Drover hooks aren't wired into this project yet — right-click the tab → 'Install Drover hook in project' to enable lifecycle events." />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HooksInstalled}" Value="True">
+                                        <Setter Property="Background" Value="#2c3a2c" />
+                                        <Setter Property="ToolTip" Value="Drover hooks are installed for this project (lifecycle events flow through the loopback listener)." />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock FontSize="11" FontWeight="SemiBold">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="hook off" />
+                                    <Setter Property="Foreground" Value="#e0a0a0" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HooksInstalled}" Value="True">
+                                            <Setter Property="Text" Value="hook ✓" />
+                                            <Setter Property="Foreground" Value="#a0e0a0" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Border>
+
+                    <TextBlock Text="{Binding CostText}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="11"
+                               VerticalAlignment="Center" Margin="6,0,12,0"
+                               ToolTip="Session cost (USD).">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CostText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <Ellipse Width="9" Height="9" Margin="0,0,6,0" VerticalAlignment="Center">
+                        <Ellipse.Style>
+                            <Style TargetType="Ellipse">
+                                <Setter Property="Fill" Value="#555" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Idle}">
+                                        <Setter Property="Fill" Value="{StaticResource Chrome.AttentionIdle}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Working}">
+                                        <Setter Property="Fill" Value="{StaticResource Chrome.AttentionWorking}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding AttentionStale}" Value="True">
+                                        <Setter Property="Fill" Value="#a04040" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
+                    <TextBlock Text="{Binding Attention}"
+                               Foreground="{StaticResource Chrome.Text}"
+                               FontSize="12" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding WorkingElapsedText, StringFormat=' · {0}'}"
+                               Foreground="{StaticResource Chrome.AttentionWorking}"
+                               FontSize="12" VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Working}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- Time of last statusLine push (local). Reassures the user that
+                         CC is still pushing — if this stops updating, the gateway/wiring
+                         is the suspect, not the metric values. -->
+                    <TextBlock Text="{Binding StatusUpdatedText, StringFormat=' · upd {0}'}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="10" VerticalAlignment="Center" Margin="8,0,0,0"
+                               ToolTip="Local time of the most recent statusLine push.">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding StatusUpdatedText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <term:DroverTerminal Grid.Row="1"
+                             x:Name="Terminal"
+                             StartupCommandLine="{Binding StartupCommandLine}"
+                             FontFamilyWhenSettingTheme="{Binding FontFamily}"
+                             FontSizeWhenSettingTheme="{Binding FontSize}"
+                             Theme="{Binding Theme}" />
+    </Grid>
+</UserControl>

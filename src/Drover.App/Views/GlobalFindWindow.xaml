@@ -1,0 +1,44 @@
+<Window x:Class="Drover.App.Views.GlobalFindWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Find across all session logs"
+        Width="900" Height="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Chrome.Panel}">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" x:Name="HeaderText"
+                   Foreground="{StaticResource Chrome.TextMuted}"
+                   FontSize="11" Margin="0,0,0,6" />
+        <TextBox   Grid.Row="1" x:Name="QueryBox" Padding="6" FontSize="13"
+                   TextChanged="Query_Changed"
+                   PreviewKeyDown="Query_PreviewKeyDown" />
+        <ListBox   Grid.Row="2" x:Name="Results" Margin="0,8,0,0"
+                   Background="{StaticResource Chrome.Background}"
+                   Foreground="{StaticResource Chrome.Text}"
+                   FontFamily="Cascadia Code, Consolas"
+                   FontSize="12"
+                   MouseDoubleClick="Results_MouseDoubleClick">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding LogName}" Foreground="{StaticResource Chrome.AttentionIdle}" FontSize="11" />
+                            <TextBlock Text=":" Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" Margin="2,0" />
+                            <TextBlock Text="{Binding LineNumber}" Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <TextBlock Grid.Row="3" x:Name="StatusLine"
+                   Foreground="{StaticResource Chrome.TextMuted}"
+                   FontSize="11" Margin="0,6,0,0" />
+    </Grid>
+</Window>

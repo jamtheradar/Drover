@@ -1,0 +1,359 @@
+<UserControl x:Class="Drover.App.Views.PlanPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Drover.App.ViewModels"
+             xmlns:m="clr-namespace:Drover.App.Models"
+             xmlns:svc="clr-namespace:Drover.App.Services"
+             xmlns:views="clr-namespace:Drover.App.Views"
+             Background="{StaticResource Chrome.Panel}"
+             Foreground="{StaticResource Chrome.Text}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <views:ScaleFontSizeConverter x:Key="ScaleFont" />
+
+        <Style x:Key="PlanIconButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Surface.ControlHover}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="TaskRowButton" TargetType="Button">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Surface.Hover}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SectionHeaderButton" TargetType="Button" BasedOn="{StaticResource TaskRowButton}">
+            <Setter Property="Padding" Value="8,6" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" BorderBrush="{StaticResource Chrome.Border}" BorderThickness="0,0,0,1" Padding="10,8">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,6">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Style="{StaticResource PlanIconButton}"
+                                Command="{Binding PlanFontScaleDownCommand}"
+                                ToolTip="Decrease font (Ctrl+-)"
+                                Content="A−"
+                                FontSize="11" />
+                        <Button Style="{StaticResource PlanIconButton}"
+                                Command="{Binding PlanFontScaleResetCommand}"
+                                ToolTip="Reset font size"
+                                Content="1×"
+                                FontSize="11" />
+                        <Button Style="{StaticResource PlanIconButton}"
+                                Command="{Binding PlanFontScaleUpCommand}"
+                                ToolTip="Increase font (Ctrl+=)"
+                                Content="A+"
+                                FontSize="13" />
+                        <Border Width="1" Margin="4,2" Background="{StaticResource Chrome.Border}" />
+                        <Button Style="{StaticResource PlanIconButton}"
+                                Command="{Binding RefreshPlanCommand}"
+                                ToolTip="Re-enumerate plans and reload"
+                                Content="↻" />
+                        <Button Style="{StaticResource PlanIconButton}"
+                                Command="{Binding OpenPlanFileCommand}"
+                                ToolTip="Open selected plan in default editor"
+                                Content="📝" />
+                        <Button Style="{StaticResource PlanIconButton}"
+                                Command="{Binding TogglePlanEditCommand}"
+                                ToolTip="Edit raw markdown · Ctrl+T toggles checkbox on the current line"
+                                Content="✏" />
+                    </StackPanel>
+                    <TextBlock Text="Plan"
+                               FontSize="11" FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource Chrome.TextMuted}" />
+                </DockPanel>
+
+                <!-- Plan picker -->
+                <ComboBox ItemsSource="{Binding AvailablePlans}"
+                          SelectedItem="{Binding SelectedPlan, Mode=TwoWay}"
+                          Visibility="{Binding HasAnyPlan, Converter={StaticResource BoolToVis}}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text=" (done)"
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           FontStyle="Italic"
+                                           Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Text="{Binding RelativePath}" TextTrimming="CharacterEllipsis">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                    <Setter Property="Opacity" Value="0.6" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <!-- Mark done / Reactivate row -->
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <Button Content="Mark done"
+                            Padding="8,2"
+                            Command="{Binding MarkSelectedPlanDoneCommand}"
+                            IsEnabled="{Binding CanMarkSelectedPlanDone}"
+                            ToolTip="Move this plan into the done/ subfolder">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedPlanIsDone}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="Reactivate"
+                            Padding="8,2"
+                            Command="{Binding ReactivateSelectedPlanCommand}"
+                            ToolTip="Move this plan back out of done/"
+                            Visibility="{Binding SelectedPlanIsDone, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Persistent action -->
+        <Button Grid.Row="1"
+                Margin="10,8,10,4"
+                Padding="8,6"
+                HorizontalContentAlignment="Left"
+                Content="Read plan and create tasks"
+                Command="{Binding ReadPlanAndCreateTasksCommand}" />
+
+        <!-- Body / empty / edit-mode -->
+        <Grid Grid.Row="2">
+            <!-- Edit mode -->
+            <Grid Visibility="{Binding PlanEditMode, Converter={StaticResource BoolToVis}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <views:MarkdownEditor Grid.Row="0"
+                                       Margin="10,8"
+                                       Text="{Binding PlanEditBuffer, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}"
+                                       FontSize="{Binding PlanFontScale, Converter={StaticResource ScaleFont}, ConverterParameter=13}" />
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="10,0,10,8">
+                    <Button Content="Cancel" Padding="10,4" Margin="0,0,8,0"
+                            Command="{Binding CancelPlanEditCommand}" />
+                    <Button Content="Save" Padding="10,4"
+                            Command="{Binding SavePlanEditCommand}" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Empty state (file doesn't exist) -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20">
+                <StackPanel.Style>
+                    <Style TargetType="StackPanel">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding PlanEditMode}" Value="False" />
+                                    <Condition Binding="{Binding CurrentPlan.Exists}" Value="False" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </StackPanel.Style>
+                <TextBlock Text="No plan file in this project"
+                           HorizontalAlignment="Center"
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           Margin="0,0,0,12" />
+                <Button Content="Create from template"
+                        Padding="10,4"
+                        HorizontalAlignment="Center"
+                        Command="{Binding CreatePlanFromTemplateCommand}" />
+            </StackPanel>
+
+            <!-- Body: sections + tasks -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer.Style>
+                    <Style TargetType="ScrollViewer">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding PlanEditMode}" Value="False" />
+                                    <Condition Binding="{Binding CurrentPlan.Exists}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ScrollViewer.Style>
+                <StackPanel Margin="0,4,0,8">
+                    <StackPanel.LayoutTransform>
+                        <ScaleTransform ScaleX="{Binding PlanFontScale}" ScaleY="{Binding PlanFontScale}" />
+                    </StackPanel.LayoutTransform>
+                    <!-- Orphan tasks -->
+                    <ItemsControl ItemsSource="{Binding CurrentPlan.OrphanTasks}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type m:PlanTask}">
+                                <Button Style="{StaticResource TaskRowButton}"
+                                        Command="{Binding DataContext.SendTaskCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}">
+                                    <DockPanel LastChildFill="True">
+                                        <TextBlock DockPanel.Dock="Left" Margin="6,0,8,0"
+                                                   Foreground="{StaticResource Chrome.TextMuted}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="☐" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                            <Setter Property="Text" Value="☑" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock svc:InlineMd.Source="{Binding Text}" TextWrapping="Wrap">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                            <Setter Property="Opacity" Value="0.5" />
+                                                            <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </DockPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Sections -->
+                    <ItemsControl ItemsSource="{Binding CurrentPlan.Sections}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type m:PlanSection}">
+                                <StackPanel Margin="0,8,0,0">
+                                    <Button Style="{StaticResource SectionHeaderButton}"
+                                            Command="{Binding DataContext.SendSectionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip="{Binding Summary}">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Heading}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       Foreground="#8AB4F8"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock svc:InlineMd.Source="{Binding Summary}"
+                                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       MaxHeight="40"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Button>
+                                    <ItemsControl ItemsSource="{Binding Tasks}" Margin="14,2,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type m:PlanTask}">
+                                                <Button Style="{StaticResource TaskRowButton}"
+                                                        Command="{Binding DataContext.SendTaskCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}">
+                                                    <DockPanel LastChildFill="True">
+                                                        <TextBlock DockPanel.Dock="Left" Margin="6,0,8,0"
+                                                                   Foreground="{StaticResource Chrome.TextMuted}">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Text" Value="☐" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                                            <Setter Property="Text" Value="☑" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock svc:InlineMd.Source="{Binding Text}" TextWrapping="Wrap">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                                                            <Setter Property="Opacity" Value="0.5" />
+                                                                            <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </DockPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Status -->
+        <Border Grid.Row="3" BorderBrush="{StaticResource Chrome.Border}" BorderThickness="0,1,0,0" Padding="10,6">
+            <TextBlock Text="{Binding PlanStatusText}"
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       FontSize="11"
+                       TextTrimming="CharacterEllipsis" />
+        </Border>
+    </Grid>
+</UserControl>

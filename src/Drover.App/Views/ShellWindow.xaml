@@ -1,0 +1,1578 @@
+<Window x:Class="Drover.App.Views.ShellWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:Drover.App.Views"
+        xmlns:local="clr-namespace:Drover.App.Views"
+        xmlns:vm="clr-namespace:Drover.App.ViewModels"
+        xmlns:svc="clr-namespace:Drover.App.Services"
+        Title="Drover" Height="850" Width="1500"
+        Background="{StaticResource Chrome.Background}">
+    <Window.Resources>
+        <views:DoubleToGridLengthConverter x:Key="DoubleToGridLengthConv" />
+        <views:TabColorToBrushConverter x:Key="TabColorBrushConv" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <DataTemplate DataType="{x:Type vm:TerminalTabViewModel}">
+            <views:TerminalTabView />
+        </DataTemplate>
+
+        <Style x:Key="TabHeaderStyle" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <SolidColorBrush x:Key="Tab.Inactive.Background" Color="#1b1b1c" />
+        <SolidColorBrush x:Key="Tab.Hover.Background"    Color="#2a2a2b" />
+        <SolidColorBrush x:Key="Tab.Active.Background"   Color="#1e1e1e" />
+        <SolidColorBrush x:Key="Tab.Inactive.Foreground" Color="#9a9a9a" />
+        <SolidColorBrush x:Key="Tab.Active.Foreground"   Color="#ffffff" />
+        <SolidColorBrush x:Key="Tab.Strip.Background"    Color="#202021" />
+        <SolidColorBrush x:Key="Tab.Strip.Border"        Color="#000000" />
+
+        <Style x:Key="DroverTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource Tab.Inactive.Foreground}" />
+            <Setter Property="Background" Value="{StaticResource Tab.Inactive.Background}" />
+            <Setter Property="Padding" Value="14,4" />
+            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Grid x:Name="Root"
+                              Background="{TemplateBinding Background}"
+                              SnapsToDevicePixels="True">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="2" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="1" />
+                            </Grid.RowDefinitions>
+                            <!-- TopAccent doubles as the per-project color stripe. When the
+                                 tab's DataContext is a TerminalTabViewModel with a TabColorBrush,
+                                 the binding wins; otherwise it stays transparent and the
+                                 IsSelected trigger below paints it with the chrome accent. -->
+                            <Border x:Name="TopAccent" Grid.Row="0"
+                                    Background="{Binding TabColorBrush, TargetNullValue=Transparent, FallbackValue=Transparent}" />
+                            <Border x:Name="ContentHost" Grid.Row="1"
+                                    Padding="{TemplateBinding Padding}"
+                                    BorderBrush="#2a2a2b"
+                                    BorderThickness="0,0,1,0">
+                                <ContentPresenter ContentSource="Header"
+                                                  VerticalAlignment="Center"
+                                                  HorizontalAlignment="Left"
+                                                  RecognizesAccessKey="True" />
+                            </Border>
+                            <Border x:Name="BottomEdge" Grid.Row="2"
+                                    Background="{StaticResource Tab.Strip.Border}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background"
+                                        Value="{StaticResource Tab.Hover.Background}" />
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource Tab.Active.Foreground}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Root" Property="Background"
+                                        Value="{StaticResource Tab.Active.Background}" />
+                                <Setter TargetName="BottomEdge" Property="Background"
+                                        Value="{StaticResource Tab.Active.Background}" />
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource Tab.Active.Foreground}" />
+                                <Setter Property="Panel.ZIndex" Value="1" />
+                            </Trigger>
+                            <!-- When there's no per-project color, keep the chrome accent stripe
+                                 on selection. Skipped when TabColorBrush is set so the project
+                                 color stays visible while the tab is active. -->
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
+                                    <Condition Binding="{Binding TabColorBrush}" Value="{x:Null}" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="TopAccent" Property="Background"
+                                        Value="{StaticResource Chrome.Accent}" />
+                            </MultiDataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="{Binding RightPaneWidth, Mode=TwoWay, Converter={StaticResource DoubleToGridLengthConv}}"
+                              MinWidth="0" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="26" />
+        </Grid.RowDefinitions>
+
+        <!-- Top bar — VS title strip: panel background, single hairline border, brand left, session usage right. -->
+        <Border Grid.Row="0" Grid.ColumnSpan="3"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="True" VerticalAlignment="Center" Margin="14,0">
+                <Border DockPanel.Dock="Right" VerticalAlignment="Center"
+                        CornerRadius="4"
+                        Background="#1b1b1c"
+                        BorderBrush="{StaticResource Chrome.Border}"
+                        BorderThickness="1"
+                        Padding="14,7"
+                        ToolTip="Rolling 5-hour Claude Code usage window. Percent comes from CC's authoritative rate-limit push when available, otherwise local USD-budget proxy.">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="SESSION" Foreground="{StaticResource Chrome.TextMuted}"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBlock Text="{Binding SessionUsageText}"
+                                   Foreground="{StaticResource Chrome.Text}"
+                                   FontSize="17" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Border Width="180" Height="8" Margin="14,0,14,0"
+                                CornerRadius="4"
+                                Background="#0e0e0e"
+                                BorderBrush="{StaticResource Chrome.Border}"
+                                BorderThickness="1"
+                                VerticalAlignment="Center">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SessionActive}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <ProgressBar Minimum="0" Maximum="100" Value="{Binding SessionPercent, Mode=OneWay}"
+                                         Background="Transparent" BorderThickness="0"
+                                         Foreground="{StaticResource Chrome.Accent}" />
+                        </Border>
+                        <TextBlock Foreground="{StaticResource Chrome.TextMuted}"
+                                   FontSize="11" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" Margin="0,0,8,0"
+                                   Text="RESETS">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SessionResetText}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Text="{Binding SessionResetText}"
+                                   Foreground="{StaticResource Chrome.Text}"
+                                   FontSize="17" FontWeight="SemiBold"
+                                   VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SessionResetText}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="DROVER" Foreground="{StaticResource Chrome.Text}"
+                               FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center"
+                               Padding="0" Margin="0,0,2,0">
+                        <TextBlock.Resources>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
+                            </Style>
+                        </TextBlock.Resources>
+                    </TextBlock>
+                    <TextBlock Text="mission control" Foreground="{StaticResource Chrome.TextMuted}"
+                               VerticalAlignment="Center" FontSize="12" Margin="10,0,0,0" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Sidebar -->
+        <Border Grid.Row="1" Grid.Column="0"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,1,0">
+            <StackPanel Margin="8">
+                <TextBlock Text="Projects" Foreground="{StaticResource Chrome.TextMuted}"
+                           FontSize="11" FontWeight="SemiBold" Margin="4,4,0,6" />
+                <TextBlock Foreground="{StaticResource Chrome.TextMuted}"
+                           FontSize="11" Margin="4,4,4,4"
+                           TextWrapping="Wrap"
+                           Text="No projects yet — add your first project to get started.">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Projects.Count}" Value="0">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <ItemsControl ItemsSource="{Binding Projects}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Command="{Binding DataContext.OpenProjectCommand,
+                                              RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"
+                                    Margin="0,2" Padding="8,5"
+                                    HorizontalContentAlignment="Left"
+                                    Background="Transparent"
+                                    Foreground="#dcdcdc"
+                                    BorderThickness="0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="9" Height="9" Margin="0,0,8,0"
+                                             VerticalAlignment="Center"
+                                             Fill="{Binding TabColor, Converter={StaticResource TabColorBrushConv}}" />
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="14"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Launch with --dangerously-skip-permissions"
+                                                  Click="LaunchDangerously_Click"
+                                                  ToolTip="Starts a new tab with Claude's permission prompts disabled. Use only on code/projects you trust."
+                                                  Tag="{Binding PlacementTarget.DataContext,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <Separator />
+                                        <MenuItem Header="Edit…"
+                                                  Click="EditProject_Click"
+                                                  Tag="{Binding PlacementTarget.DataContext,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <MenuItem Header="Remove"
+                                                  Click="RemoveProject_Click"
+                                                  Tag="{Binding PlacementTarget.DataContext,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Content="+ Add project"
+                        Click="AddProject_Click"
+                        Margin="0,8,0,12" Padding="8,4"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
+                <Border Margin="0,0,0,8" Height="1" Background="{StaticResource Chrome.Border}" />
+                <Button Content="Dashboard"
+                        Command="{Binding ShowDashboardCommand}"
+                        Margin="0,0,0,4" Padding="8,6"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.Text}"
+                        BorderThickness="0" />
+                <Button Content="Tokenomics"
+                        Command="{Binding ShowTokenomicsCommand}"
+                        Margin="0,0,0,4" Padding="8,6"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.Text}"
+                        BorderThickness="0" />
+                <Button Content="Memory"
+                        Command="{Binding ShowMemoryCommand}"
+                        Margin="0,0,0,8" Padding="8,6"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.Text}"
+                        BorderThickness="0" />
+                <Button Content="Cheat sheet"
+                        Click="CheatSheet_Click"
+                        ToolTip="Claude Code shortcuts, slash commands, and CLI flags (F1)"
+                        Margin="0,2,0,0" Padding="8,4"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
+                <Button Content="Settings…"
+                        Click="Settings_Click"
+                        Margin="0,2,0,0" Padding="8,4"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
+                <Button Content="About Drover"
+                        Click="About_Click"
+                        Margin="0,2,0,0" Padding="8,4"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
+            </StackPanel>
+        </Border>
+
+        <!-- Welcome / home view: visible when no tabs are open. -->
+        <Grid Grid.Row="1" Grid.Column="1" Background="{StaticResource Chrome.Background}">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Tabs.Count}" Value="0" />
+                                <Condition Binding="{Binding DashboardActive}" Value="False" />
+                                <Condition Binding="{Binding TokenomicsActive}" Value="False" />
+                                <Condition Binding="{Binding MemoryActive}" Value="False" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Visibility" Value="Visible" />
+                        </MultiDataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="900">
+                <TextBlock Text="Drover" FontSize="36" Foreground="{StaticResource Chrome.Text}" HorizontalAlignment="Center" />
+                <TextBlock Text="mission control for Claude Code"
+                           FontSize="13" Foreground="{StaticResource Chrome.TextMuted}"
+                           HorizontalAlignment="Center" Margin="0,4,0,0" />
+                <TextBlock x:Name="WelcomeVersionText"
+                           FontSize="11" Foreground="{StaticResource Chrome.TextMuted}"
+                           HorizontalAlignment="Center" Margin="0,2,0,0" />
+                <TextBlock Text="open a project" FontSize="12"
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           HorizontalAlignment="Center" Margin="0,32,0,12" />
+                <ItemsControl ItemsSource="{Binding Projects}" HorizontalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Command="{Binding DataContext.OpenProjectCommand,
+                                              RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"
+                                    Margin="8" Padding="20,16"
+                                    Background="{StaticResource Chrome.Panel}"
+                                    BorderBrush="{StaticResource Chrome.Border}"
+                                    BorderThickness="1"
+                                    Foreground="{StaticResource Chrome.Text}"
+                                    MinWidth="180">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Path}" FontSize="10"
+                                               Foreground="{StaticResource Chrome.TextMuted}"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="220" Margin="0,4,0,0" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock HorizontalAlignment="Center" Margin="0,24,0,0"
+                           Foreground="{StaticResource Chrome.TextMuted}" FontSize="11">
+                    <Run Text="Ctrl+Shift+P palette" />
+                    <Run Text="  ·  " />
+                    <Run Text="Ctrl+Tab to cycle" />
+                    <Run Text="  ·  " />
+                    <Run Text="F2 to rename" />
+                </TextBlock>
+            </StackPanel>
+        </Grid>
+
+        <!-- Dashboard view: per-tab cards while sessions keep running underneath. -->
+        <Grid Grid.Row="1" Grid.Column="1" Background="{StaticResource Chrome.Background}">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding DashboardActive}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="{StaticResource Chrome.Panel}"
+                    BorderBrush="{StaticResource Chrome.Border}"
+                    BorderThickness="0,0,0,1" Padding="20,12">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right"
+                            Content="← Back to session"
+                            Command="{Binding BackToSessionCommand}"
+                            Padding="10,5"
+                            VerticalAlignment="Center"
+                            ToolTip="Return to the active terminal tab">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                <Setter Property="IsEnabled" Value="True" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Tabs.Count}" Value="0">
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <TextBlock DockPanel.Dock="Right"
+                               Text="{Binding DailyCostText}"
+                               FontSize="13" VerticalAlignment="Center"
+                               Margin="0,0,16,0"
+                               Foreground="{StaticResource Chrome.TextMuted}" />
+                    <StackPanel>
+                        <TextBlock Text="Dashboard" FontSize="18"
+                                   Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold" />
+                        <TextBlock Text="Live sessions — click a card to jump to its tab."
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" Margin="0,2,0,0" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16">
+                <StackPanel>
+                    <!-- Tokenomics panel -->
+                    <Border Margin="8,0,8,16" Padding="20,16"
+                            Background="{StaticResource Chrome.Panel}"
+                            BorderBrush="{StaticResource Chrome.Border}"
+                            BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Tokenomics" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Text="{Binding DailyCostText}"
+                                           FontSize="28" Foreground="{StaticResource Chrome.Text}"
+                                           Margin="0,2,0,0" />
+                                <TextBlock Text="{Binding DailyTokensText}"
+                                           FontSize="11" Foreground="{StaticResource Chrome.TextMuted}"
+                                           Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding DailyCacheText}"
+                                           FontSize="11" Foreground="{StaticResource Chrome.TextMuted}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center" MinWidth="200">
+                                <TextBlock Text="By model (today)" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" Margin="0,0,0,4" />
+                                <ItemsControl ItemsSource="{Binding ModelSpend}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel LastChildFill="True" Margin="0,2">
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Text="{Binding CostText}"
+                                                           Foreground="{StaticResource Chrome.Text}"
+                                                           FontSize="11" />
+                                                <TextBlock Text="{Binding Model}"
+                                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                                           FontSize="11"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Margin="0,0,12,0" />
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="no usage today"
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           FontSize="11" FontStyle="Italic">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ModelSpend.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Foreground="{StaticResource Chrome.TextMuted}"
+                               Text="No sessions open. Open a project from the sidebar."
+                               Margin="8" FontSize="12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Tabs.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <ItemsControl ItemsSource="{Binding Tabs}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Margin="8" Padding="16,12"
+                                        Width="280"
+                                        HorizontalContentAlignment="Stretch"
+                                        Background="{StaticResource Chrome.Panel}"
+                                        BorderBrush="{StaticResource Chrome.Border}"
+                                        BorderThickness="1"
+                                        Foreground="{StaticResource Chrome.Text}"
+                                        Command="{Binding DataContext.FocusTabCommand,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}">
+                                    <StackPanel>
+                                        <DockPanel LastChildFill="True">
+                                            <Ellipse DockPanel.Dock="Left" Width="10" Height="10"
+                                                     VerticalAlignment="Center" Margin="0,0,8,0">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Fill" Value="#555" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Idle}">
+                                                                <Setter Property="Fill" Value="{StaticResource Chrome.AttentionIdle}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Working}">
+                                                                <Setter Property="Fill" Value="{StaticResource Chrome.AttentionWorking}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding AttentionStale}" Value="True">
+                                                                <Setter Property="Fill" Value="#a04040" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                            <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding Project.Name}" FontSize="11"
+                                                   Foreground="{StaticResource Chrome.TextMuted}" Margin="0,6,0,0" />
+                                        <TextBlock Text="{Binding Project.Path}" FontSize="10"
+                                                   Foreground="{StaticResource Chrome.TextMuted}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <TextBlock Text="{Binding Attention}" FontSize="11"
+                                                       Foreground="{StaticResource Chrome.Text}" />
+                                            <TextBlock Text="{Binding WorkingElapsedText, StringFormat=' · {0}'}"
+                                                       FontSize="11"
+                                                       Foreground="{StaticResource Chrome.AttentionWorking}" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <TextBlock Text="{Binding ModelText}" FontSize="10"
+                                                       Foreground="{StaticResource Chrome.TextMuted}" />
+                                            <TextBlock Text="{Binding ContextPercentText, StringFormat=' · ctx {0}'}"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource Chrome.TextMuted}" />
+                                            <TextBlock Text="{Binding CostText, StringFormat=' · {0}'}"
+                                                       FontSize="10"
+                                                       Foreground="{StaticResource Chrome.TextMuted}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Tokenomics view -->
+        <Grid Grid.Row="1" Grid.Column="1" Background="{StaticResource Chrome.Background}">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding TokenomicsActive}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="{StaticResource Chrome.Panel}"
+                    BorderBrush="{StaticResource Chrome.Border}"
+                    BorderThickness="0,0,0,1" Padding="20,12">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right"
+                            Content="← Back to session"
+                            Command="{Binding BackToSessionCommand}"
+                            Padding="10,5" VerticalAlignment="Center">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Tabs.Count}" Value="0">
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <StackPanel>
+                        <TextBlock Text="Tokenomics" FontSize="18"
+                                   Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold" />
+                        <TextBlock Text="Spend and token usage across all Claude projects on this machine."
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" Margin="0,2,0,0" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16">
+                <StackPanel>
+                    <!-- KPI strip -->
+                    <UniformGrid Columns="4" Margin="8,0,8,16">
+                        <Border Margin="0,0,8,0" Padding="16,14"
+                                Background="{StaticResource Chrome.Panel}"
+                                BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="TODAY" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Text="{Binding DailyCostText}" FontSize="22"
+                                           Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding DailyTokensText}" FontSize="11"
+                                           Foreground="{StaticResource Chrome.TextMuted}" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="4,0,4,0" Padding="16,14"
+                                Background="{StaticResource Chrome.Panel}"
+                                BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="LAST 7 DAYS" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Text="{Binding WeekCostText}" FontSize="22"
+                                           Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="4,0,4,0" Padding="16,14"
+                                Background="{StaticResource Chrome.Panel}"
+                                BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="LAST 30 DAYS" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Text="{Binding MonthCostText}" FontSize="22"
+                                           Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <Border Margin="8,0,0,0" Padding="16,14"
+                                Background="{StaticResource Chrome.Panel}"
+                                BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="ALL-TIME" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Text="{Binding AllTimeCostText}" FontSize="22"
+                                           Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding AllTimeTokensText}" FontSize="11"
+                                           Foreground="{StaticResource Chrome.TextMuted}" Margin="0,4,0,0"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+
+                    <!-- Daily chart -->
+                    <Border Margin="8,0,8,16" Padding="16,14"
+                            Background="{StaticResource Chrome.Panel}"
+                            BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Spend — last 14 days" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Chrome.TextMuted}" />
+                            <ItemsControl ItemsSource="{Binding DailyBars}" Margin="0,12,0,0" Height="150">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Rows="1" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="3,0" ToolTip="{Binding CostText}">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Rectangle Grid.Row="0"
+                                                       VerticalAlignment="Bottom"
+                                                       Height="{Binding BarHeight}"
+                                                       RadiusX="2" RadiusY="2">
+                                                <Rectangle.Style>
+                                                    <Style TargetType="Rectangle">
+                                                        <Setter Property="Fill" Value="{StaticResource Chrome.Accent}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                                <Setter Property="Fill" Value="{StaticResource Chrome.AttentionWorking}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Rectangle.Style>
+                                            </Rectangle>
+                                            <TextBlock Grid.Row="1" Text="{Binding Label}"
+                                                       FontSize="9" Margin="0,4,0,0"
+                                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                                       HorizontalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Two-column: projects + models -->
+                    <Grid Margin="8,0,8,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Margin="0,0,8,0" Padding="16,14"
+                                Background="{StaticResource Chrome.Panel}"
+                                BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="Top projects (7d)" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <ItemsControl ItemsSource="{Binding ProjectSpend}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,3">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0">
+                                                    <DockPanel LastChildFill="True">
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding TokensText}"
+                                                                   FontSize="10" Foreground="{StaticResource Chrome.TextMuted}" />
+                                                        <TextBlock Text="{Binding Project}" FontSize="12"
+                                                                   Foreground="{StaticResource Chrome.Text}"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                    </DockPanel>
+                                                    <Grid Margin="0,4,0,0" Height="4" Background="#2c2c2d">
+                                                        <Rectangle HorizontalAlignment="Left"
+                                                                   Fill="{StaticResource Chrome.Accent}"
+                                                                   RadiusX="2" RadiusY="2">
+                                                            <Rectangle.Width>
+                                                                <MultiBinding StringFormat="{}{0}">
+                                                                    <Binding Path="ActualWidth"
+                                                                             RelativeSource="{RelativeSource AncestorType=Grid}" />
+                                                                </MultiBinding>
+                                                            </Rectangle.Width>
+                                                            <Rectangle.RenderTransform>
+                                                                <ScaleTransform ScaleX="{Binding BarFraction}" />
+                                                            </Rectangle.RenderTransform>
+                                                        </Rectangle>
+                                                    </Grid>
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1" Text="{Binding CostText}"
+                                                           FontSize="12" Margin="12,0,0,0"
+                                                           VerticalAlignment="Top"
+                                                           Foreground="{StaticResource Chrome.Text}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="No project usage in the last 7 days."
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           FontStyle="Italic" FontSize="11" Margin="0,8,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ProjectSpend.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="1" Margin="8,0,0,0" Padding="16,14"
+                                Background="{StaticResource Chrome.Panel}"
+                                BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="By model (7d)" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <ItemsControl ItemsSource="{Binding ModelSpend7d}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel LastChildFill="True" Margin="0,3">
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding CostText}"
+                                                           Foreground="{StaticResource Chrome.Text}" FontSize="12" />
+                                                <TextBlock Text="{Binding Model}"
+                                                           Foreground="{StaticResource Chrome.TextMuted}" FontSize="12"
+                                                           TextTrimming="CharacterEllipsis" Margin="0,0,12,0" />
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="No model usage tracked in the last 7 days."
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           FontStyle="Italic" FontSize="11" Margin="0,8,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ModelSpend7d.Count}" Value="0">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Recent sessions -->
+                    <Border Margin="8,0,8,16" Padding="16,14"
+                            Background="{StaticResource Chrome.Panel}"
+                            BorderBrush="{StaticResource Chrome.Border}" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Recent sessions" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Chrome.TextMuted}" />
+                            <Grid Margin="0,8,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="80" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="160" />
+                                    <ColumnDefinition Width="80" />
+                                    <ColumnDefinition Width="80" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="WHEN" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Grid.Column="1" Text="PROJECT" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Grid.Column="2" Text="MODEL" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Grid.Column="3" Text="TOKENS" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                <TextBlock Grid.Column="4" Text="COST" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           HorizontalAlignment="Right" />
+                            </Grid>
+                            <ItemsControl ItemsSource="{Binding RecentSessions}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,3">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="80" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="160" />
+                                                <ColumnDefinition Width="80" />
+                                                <ColumnDefinition Width="80" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding TimeText}" FontSize="11"
+                                                       Foreground="{StaticResource Chrome.TextMuted}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Project}" FontSize="11"
+                                                       Foreground="{StaticResource Chrome.Text}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="2" Text="{Binding Model}" FontSize="11"
+                                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="3" Text="{Binding TokensText}" FontSize="11"
+                                                       Foreground="{StaticResource Chrome.TextMuted}" />
+                                            <TextBlock Grid.Column="4" Text="{Binding CostText}" FontSize="11"
+                                                       Foreground="{StaticResource Chrome.Text}"
+                                                       HorizontalAlignment="Right" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="No recent sessions found."
+                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                       FontStyle="Italic" FontSize="11" Margin="0,8,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding RecentSessions.Count}" Value="0">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Memory view -->
+        <Grid Grid.Row="1" Grid.Column="1" Background="{StaticResource Chrome.Background}">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding MemoryActive}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="{StaticResource Chrome.Panel}"
+                    BorderBrush="{StaticResource Chrome.Border}"
+                    BorderThickness="0,0,0,1" Padding="20,12">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right"
+                            Content="Refresh"
+                            Command="{Binding RefreshMemoryCommand}"
+                            Padding="10,5" VerticalAlignment="Center" Margin="8,0,0,0" />
+                    <Button DockPanel.Dock="Right"
+                            Content="← Back to session"
+                            Command="{Binding BackToSessionCommand}"
+                            Padding="10,5" VerticalAlignment="Center">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Tabs.Count}" Value="0">
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <StackPanel>
+                        <TextBlock Text="Memory" FontSize="18"
+                                   Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold" />
+                        <TextBlock Text="CLAUDE.md and ~/.claude memory files discovered on this machine."
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" Margin="0,2,0,0" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="320" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="{StaticResource Chrome.Panel}"
+                        BorderBrush="{StaticResource Chrome.Border}" BorderThickness="0,0,1,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="8">
+                            <TextBlock Text="USER MEMORY" FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Chrome.TextMuted}" Margin="6,8,0,4" />
+                            <ItemsControl ItemsSource="{Binding UserMemoryFiles}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Command="{Binding DataContext.SelectMemoryCommand,
+                                                          RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Margin="0,1" Padding="8,5"
+                                                HorizontalContentAlignment="Stretch"
+                                                Background="Transparent" BorderThickness="0"
+                                                Foreground="{StaticResource Chrome.Text}">
+                                            <DockPanel LastChildFill="True">
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Text="{Binding SizeText}" FontSize="10"
+                                                           Foreground="{StaticResource Chrome.TextMuted}" />
+                                                <TextBlock Text="{Binding Name}" FontSize="12"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </DockPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="PROJECT MEMORY" FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Chrome.TextMuted}" Margin="6,16,0,4" />
+                            <ItemsControl ItemsSource="{Binding ProjectMemoryFiles}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Command="{Binding DataContext.SelectMemoryCommand,
+                                                          RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Margin="0,1" Padding="8,5"
+                                                HorizontalContentAlignment="Stretch"
+                                                Background="Transparent" BorderThickness="0"
+                                                Foreground="{StaticResource Chrome.Text}">
+                                            <StackPanel>
+                                                <DockPanel LastChildFill="True">
+                                                    <TextBlock DockPanel.Dock="Right"
+                                                               Text="{Binding SizeText}" FontSize="10"
+                                                               Foreground="{StaticResource Chrome.TextMuted}" />
+                                                    <TextBlock Text="{Binding Name}" FontSize="12"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </DockPanel>
+                                                <TextBlock Text="{Binding Subtitle}" FontSize="10"
+                                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="No memory files found."
+                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                       FontStyle="Italic" FontSize="11" Margin="6,8,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasNoMemory}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+                <Grid Grid.Column="1">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" BorderBrush="{StaticResource Chrome.Border}"
+                            BorderThickness="0,0,0,1" Padding="16,10">
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="●" Foreground="{StaticResource Chrome.AttentionWorking}"
+                                           VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0"
+                                           ToolTip="Unsaved changes">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MemoryDirty}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Text="{Binding MemorySaveStatus}"
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           FontSize="10" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <Button Command="{Binding ToggleMemoryEditCommand}"
+                                        Padding="8,4" Margin="0,0,4,0">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                            <Setter Property="Content" Value="Edit" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MemoryEditMode}" Value="True">
+                                                    <Setter Property="Content" Value="Preview" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding SelectedMemoryPath}" Value="{x:Null}">
+                                                    <Setter Property="IsEnabled" Value="False" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="Save"
+                                        Command="{Binding SaveMemoryCommand}"
+                                        Padding="8,4">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MemoryDirty}" Value="True">
+                                                    <Setter Property="IsEnabled" Value="True" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="{Binding SelectedMemoryName, FallbackValue='Select a memory file'}"
+                                           Foreground="{StaticResource Chrome.Text}"
+                                           FontWeight="SemiBold" FontSize="13" />
+                                <TextBlock Text="{Binding SelectedMemoryPath}"
+                                           Foreground="{StaticResource Chrome.TextMuted}" FontSize="10"
+                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <Grid Grid.Row="1">
+                        <!-- Editor (visible in edit mode) -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      Padding="16">
+                            <ScrollViewer.Style>
+                                <Style TargetType="ScrollViewer">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding MemoryEditMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ScrollViewer.Style>
+                            <TextBox Text="{Binding SelectedMemoryContent, UpdateSourceTrigger=PropertyChanged}"
+                                     BorderThickness="0"
+                                     Background="Transparent"
+                                     Foreground="{StaticResource Chrome.Text}"
+                                     FontFamily="Cascadia Code, Consolas, monospace"
+                                     FontSize="12"
+                                     TextWrapping="NoWrap"
+                                     AcceptsReturn="True"
+                                     AcceptsTab="True" />
+                        </ScrollViewer>
+
+                        <!-- Rendered preview (visible when not in edit mode) -->
+                        <FlowDocumentScrollViewer Document="{Binding MemoryRendered}"
+                                                  Padding="20,12"
+                                                  Background="Transparent"
+                                                  IsToolBarVisible="False"
+                                                  VerticalScrollBarVisibility="Auto">
+                            <FlowDocumentScrollViewer.Style>
+                                <Style TargetType="FlowDocumentScrollViewer">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding MemoryEditMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </FlowDocumentScrollViewer.Style>
+                        </FlowDocumentScrollViewer>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <!-- Tabs + terminal area, optionally split. -->
+        <Grid Grid.Row="1" Grid.Column="1">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Tabs.Count}" Value="0">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding DashboardActive}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding TokenomicsActive}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding MemoryActive}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="200" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="SecondaryColumn" Width="0" />
+            </Grid.ColumnDefinitions>
+
+            <local:TabControlEx Grid.Column="0"
+                        ItemsSource="{Binding Tabs}"
+                        SelectedItem="{Binding SelectedTab}"
+                        ItemContainerStyle="{StaticResource DroverTabItemStyle}"
+                        Background="{StaticResource Chrome.Background}">
+                <local:TabControlEx.Template>
+                    <ControlTemplate TargetType="{x:Type local:TabControlEx}">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0"
+                                    Background="{StaticResource Tab.Strip.Background}"
+                                    BorderBrush="{StaticResource Tab.Strip.Border}"
+                                    BorderThickness="0,0,0,1">
+                                <TabPanel IsItemsHost="True"
+                                          Background="Transparent"
+                                          Margin="0" />
+                            </Border>
+                            <Grid Grid.Row="1" x:Name="PART_ItemsHolder" />
+                        </Grid>
+                    </ControlTemplate>
+                </local:TabControlEx.Template>
+                <local:TabControlEx.ContentTemplate>
+                    <DataTemplate>
+                        <views:TerminalTabView />
+                    </DataTemplate>
+                </local:TabControlEx.ContentTemplate>
+                <local:TabControlEx.ItemTemplate>
+                    <DataTemplate>
+                        <Grid MouseDown="TabHeader_MouseDown" Tag="{Binding}"
+                              Background="Transparent"
+                              MinWidth="170" MaxWidth="240">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="#555" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Idle}">
+                                                        <Setter Property="Fill" Value="{StaticResource Chrome.AttentionIdle}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Working}">
+                                                        <Setter Property="Fill" Value="{StaticResource Chrome.AttentionWorking}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding AttentionStale}" Value="True">
+                                                        <Setter Property="Fill" Value="#a04040" />
+                                                        <Setter Property="ToolTip" Value="No attention signal — Claude Code may not be running, or its window title doesn't match the expected pattern." />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock Text="{Binding Title}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               FontSize="12" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="14,2,0,0">
+                                    <TextBlock Text="{Binding ModelText}"
+                                               Foreground="#cfe7ff"
+                                               FontSize="10" FontWeight="SemiBold"
+                                               ToolTip="Active model.">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ModelText}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding EffortText, StringFormat=' · {0}'}"
+                                               FontSize="10" FontWeight="SemiBold"
+                                               ToolTip="Reasoning effort (thinking budget).">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Setter Property="Foreground" Value="#e0c8f0" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding EffortText}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding EffortText}" Value="ultrathink">
+                                                        <Setter Property="Foreground" Value="#f0a8e0" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding WorkingElapsedText, StringFormat=' · {0}'}"
+                                               Foreground="{StaticResource Chrome.AttentionWorking}"
+                                               FontSize="10">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Attention}" Value="{x:Static svc:AttentionState.Working}">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Command="{Binding DataContext.CloseTabCommand,
+                                              RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}"
+                                    Margin="10,0,-4,0"
+                                    Width="18" Height="18"
+                                    Background="Transparent" BorderThickness="0"
+                                    Foreground="#888" FontSize="12"
+                                    Cursor="Hand"
+                                    ToolTip="Close tab">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd" Background="Transparent" CornerRadius="3">
+                                            <TextBlock Text="×"
+                                                       Foreground="{TemplateBinding Foreground}"
+                                                       FontSize="14"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,-2,0,0" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#3f3f40" />
+                                                <Setter Property="Foreground" Value="#ffffff" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                            <Grid.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Open folder"
+                                              Click="OpenFolder_Click"
+                                              Tag="{Binding}" />
+                                    <Separator />
+                                    <MenuItem Header="Split right"
+                                              Click="SplitRight_Click"
+                                              Tag="{Binding}" />
+                                    <MenuItem Header="Pop out"
+                                              Click="PopOut_Click"
+                                              Tag="{Binding}" />
+                                    <MenuItem Header="Open log"
+                                              Click="OpenLog_Click"
+                                              Tag="{Binding}" />
+                                    <MenuItem Header="Export history (.md)…"
+                                              Click="ExportHistory_Click"
+                                              Tag="{Binding}"
+                                              ToolTip="Strip ANSI from this tab's session log and save a markdown copy to %APPDATA%\Drover\exports." />
+                                    <MenuItem Header="Find… (Ctrl+F)"
+                                              Click="Find_Click"
+                                              Tag="{Binding}" />
+                                    <Separator />
+                                    <MenuItem Header="Open hooks log"
+                                              Click="OpenHooksLog_Click"
+                                              ToolTip="JSONL log of every Claude Code hook event the gateway received." />
+                                    <MenuItem Header="Install Drover hook in project"
+                                              Click="InstallHook_Click"
+                                              Tag="{Binding}"
+                                              ToolTip="Adds Drover's hook entries to this project's .claude/settings.local.json so attention/lifecycle events flow into Drover for this folder.">
+                                        <MenuItem.Style>
+                                            <Style TargetType="MenuItem">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HooksInstalled}" Value="True">
+                                                        <Setter Property="Header" Value="Reinstall Drover hook in project" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </MenuItem.Style>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </Grid.ContextMenu>
+                        </Grid>
+                    </DataTemplate>
+                </local:TabControlEx.ItemTemplate>
+            </local:TabControlEx>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                          Background="{StaticResource Chrome.Border}"
+                          ResizeBehavior="PreviousAndNext">
+                <GridSplitter.Style>
+                    <Style TargetType="GridSplitter">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding SecondaryTab}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </GridSplitter.Style>
+            </GridSplitter>
+
+            <Grid Grid.Column="2">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding SecondaryTab}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Background="{StaticResource Chrome.Panel}"
+                        BorderBrush="{StaticResource Chrome.Border}"
+                        BorderThickness="0,0,0,1">
+                    <DockPanel LastChildFill="False" Margin="10,0">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="{Binding SecondaryTab.Title, FallbackValue='split'}"
+                                   Foreground="{StaticResource Chrome.Text}"
+                                   VerticalAlignment="Center"
+                                   FontSize="12" />
+                        <Button DockPanel.Dock="Right"
+                                Content="×"
+                                Command="{Binding CloseSecondaryCommand}"
+                                Padding="8,2"
+                                Margin="4"
+                                Background="Transparent" BorderThickness="0"
+                                Foreground="#888" />
+                    </DockPanel>
+                </Border>
+                <ContentPresenter Grid.Row="1" Content="{Binding SecondaryTab}" />
+            </Grid>
+        </Grid>
+
+        <!-- GridSplitter — drag the right pane wider/narrower. Only visible when a panel is open. -->
+        <GridSplitter Grid.Row="1" Grid.Column="2"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Stretch"
+                      Width="4"
+                      Background="Transparent"
+                      ShowsPreview="False"
+                      ResizeBehavior="PreviousAndCurrent"
+                      ResizeDirection="Columns"
+                      Cursor="SizeWE"
+                      Panel.ZIndex="10"
+                      Visibility="{Binding RightPaneOpen, Converter={StaticResource BoolToVis}}" />
+
+        <!-- Plan panel — mutually exclusive with Activity timeline and Tasks. -->
+        <Border Grid.Row="1" Grid.Column="2"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="1,0,0,0"
+                Visibility="{Binding PlanPanelVisible, Converter={StaticResource BoolToVis}}">
+            <views:PlanPanel />
+        </Border>
+
+        <!-- Tasks panel — mutually exclusive with Plan and Activity. -->
+        <Border Grid.Row="1" Grid.Column="2"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="1,0,0,0"
+                Visibility="{Binding TaskPanelVisible, Converter={StaticResource BoolToVis}}">
+            <views:TaskPanel />
+        </Border>
+
+        <!-- File explorer panel — mutually exclusive with Plan, Tasks, Activity. -->
+        <Border Grid.Row="1" Grid.Column="2"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="1,0,0,0"
+                Visibility="{Binding FileExplorerPanelVisible, Converter={StaticResource BoolToVis}}">
+            <views:FileExplorerPanel />
+        </Border>
+
+        <!-- Activity timeline pane -->
+        <Border Grid.Row="1" Grid.Column="2"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="1,0,0,0"
+                Visibility="{Binding ActivityVisible, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Activity" Margin="12,10"
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           FontSize="11" FontWeight="SemiBold" />
+                <ListBox Grid.Row="1"
+                         ItemsSource="{Binding Activity.Entries}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Foreground="{StaticResource Chrome.Text}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="8,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding TimeText}"
+                                               Foreground="{StaticResource Chrome.TextMuted}"
+                                               FontSize="10" Margin="0,0,8,0" />
+                                    <TextBlock Text="{Binding TabTitle}" FontSize="12" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding Transition}"
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           FontSize="10" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+
+        <!-- Status line — chrome panel with a 2px accent stripe on top so the colour reads
+             as Drover branding without a solid blue bar dominating the layout. -->
+        <Border Grid.Row="2" Grid.ColumnSpan="3" Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}" BorderThickness="0,1,0,0">
+            <Border.Resources>
+                <Style x:Key="StatusRegion" TargetType="Button">
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="FontSize" Value="11" />
+                    <Setter Property="Padding" Value="10,0" />
+                    <Setter Property="Cursor" Value="Hand" />
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Bd"
+                                        Background="{TemplateBinding Background}"
+                                        Padding="{TemplateBinding Padding}"
+                                        SnapsToDevicePixels="True">
+                                    <ContentPresenter VerticalAlignment="Center"
+                                                      HorizontalAlignment="Center"
+                                                      RecognizesAccessKey="True" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Surface.ControlHover}" />
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource Surface.ControlPressed}" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Border.Resources>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="2" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Background="{StaticResource Chrome.Accent}" />
+                <DockPanel Grid.Row="1" LastChildFill="True">
+                    <Button DockPanel.Dock="Right"
+                            Style="{StaticResource StatusRegion}"
+                            Content="Activity"
+                            Command="{Binding ToggleActivityCommand}"
+                            ToolTip="Open the activity drawer." />
+                    <Border DockPanel.Dock="Right" Width="1" Background="{StaticResource Chrome.Border}" Margin="0,4" />
+                    <Button DockPanel.Dock="Right"
+                            Style="{StaticResource StatusRegion}"
+                            Content="Plan"
+                            Command="{Binding TogglePlanPanelCommand}"
+                            ToolTip="Open the plan panel." />
+                    <Border DockPanel.Dock="Right" Width="1" Background="{StaticResource Chrome.Border}" Margin="0,4" />
+                    <Button DockPanel.Dock="Right"
+                            Style="{StaticResource StatusRegion}"
+                            Content="Tasks"
+                            Command="{Binding ToggleTaskPanelCommand}"
+                            ToolTip="Open the tasks panel." />
+                    <Border DockPanel.Dock="Right" Width="1" Background="{StaticResource Chrome.Border}" Margin="0,4" />
+                    <Button DockPanel.Dock="Right"
+                            Style="{StaticResource StatusRegion}"
+                            Content="Files"
+                            Command="{Binding ToggleFileExplorerPanelCommand}"
+                            ToolTip="Open the file explorer for the current tab." />
+                    <Border DockPanel.Dock="Right" Width="1" Background="{StaticResource Chrome.Border}" Margin="0,4" />
+                    <Border DockPanel.Dock="Right" Padding="10,0" VerticalAlignment="Stretch"
+                            ToolTip="Aggregate Claude spend today across all projects (parsed from ~/.claude transcripts).">
+                        <TextBlock Text="{Binding DailyCostText}"
+                                   Foreground="{StaticResource Chrome.Text}" FontSize="11"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                    <Border DockPanel.Dock="Left" Padding="14,0" VerticalAlignment="Stretch">
+                        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </Border>
+                </DockPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

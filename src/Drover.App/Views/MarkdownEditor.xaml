@@ -1,0 +1,19 @@
+<UserControl x:Class="Drover.App.Views.MarkdownEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:avalonedit="http://icsharpcode.net/sharpdevelop/avalonedit">
+    <avalonedit:TextEditor x:Name="Editor"
+                            FontFamily="Cascadia Code, Consolas"
+                            ShowLineNumbers="True"
+                            WordWrap="True">
+        <avalonedit:TextEditor.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Cut" Command="ApplicationCommands.Cut" />
+                <MenuItem Header="Copy" Command="ApplicationCommands.Copy" />
+                <MenuItem Header="Paste" Command="ApplicationCommands.Paste" />
+                <Separator />
+                <MenuItem x:Name="ThemeMenu" Header="Theme" />
+            </ContextMenu>
+        </avalonedit:TextEditor.ContextMenu>
+    </avalonedit:TextEditor>
+</UserControl>

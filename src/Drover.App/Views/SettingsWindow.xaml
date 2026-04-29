@@ -1,0 +1,191 @@
+<Window x:Class="Drover.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings"
+        Height="560" Width="500"
+        MinHeight="360" MinWidth="420"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        Background="{StaticResource Chrome.Panel}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TabControl Grid.Row="0" Grid.RowSpan="2" Background="Transparent" BorderThickness="0">
+            <TabItem Header="Appearance">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Font" Foreground="{StaticResource Chrome.Text}"
+                               VerticalAlignment="Center" Margin="0,0,12,10" />
+                    <ComboBox  Grid.Row="0" Grid.Column="1" x:Name="FontBox" Margin="0,0,0,10" Padding="4" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Size" Foreground="{StaticResource Chrome.Text}"
+                               VerticalAlignment="Center" Margin="0,0,12,10" />
+                    <ComboBox  Grid.Row="1" Grid.Column="1" x:Name="SizeBox" Margin="0,0,0,10" Padding="4" />
+
+                    <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                              x:Name="ResumeBox"
+                              Content="Resume Claude conversations on session restore (--resume)"
+                              Foreground="{StaticResource Chrome.Text}"
+                              Margin="0,8,0,0" />
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                               Text="Settings apply to new tabs. Existing tabs keep their current font."
+                               Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                               Margin="0,8,0,0" TextWrapping="Wrap" VerticalAlignment="Top" />
+                </Grid>
+            </TabItem>
+            <TabItem Header="Hooks">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="8">
+                        <TextBlock Text="Event hooks"
+                                   Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold"
+                                   Margin="0,0,0,4" />
+                        <TextBlock Text="Drover registers hooks in ~/.claude/settings.json so Claude Code POSTs lifecycle events back to it. Entries are removed when disabled."
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                   Margin="0,0,0,8" TextWrapping="Wrap" />
+
+                        <StackPanel Margin="0,0,0,12">
+                            <CheckBox x:Name="HooksEnabledBox"
+                                      Content="Enable Claude Code hooks"
+                                      Foreground="{StaticResource Chrome.Text}" />
+                            <TextBlock Text="Master switch for event hooks. When off, Drover removes its hook entries from ~/.claude/settings.json and stops driving attention state from CC events. The OSC scraper still runs as a fallback."
+                                       Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                       Margin="20,2,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <StackPanel Margin="0,0,0,12">
+                            <CheckBox x:Name="IdleHookEnabledBox"
+                                      Content="Enable idle hook (Stop event)"
+                                      Foreground="{StaticResource Chrome.Text}" />
+                            <TextBlock Text="Wires CC's Stop event — fires when the assistant turn finishes. Drives the tab's transition back to idle. Turn off if a third-party tool already owns this slot."
+                                       Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                       Margin="20,2,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <StackPanel Margin="0,0,0,16">
+                            <CheckBox x:Name="HooksDebugLoggingBox"
+                                      Content="Debug logging"
+                                      Foreground="{StaticResource Chrome.Text}" />
+                            <TextBlock Text="Writes every hook event and statusLine push to %APPDATA%\Drover\logs\hooks.jsonl and statusline.jsonl (5MB rotation). Off by default."
+                                       Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                       Margin="20,2,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <Separator Margin="0,4,0,12" />
+
+                        <TextBlock Text="StatusLine integration"
+                                   Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold"
+                                   Margin="0,0,0,4" />
+                        <TextBlock Text="Independent of event hooks — uses its own slot in ~/.claude/settings.json."
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                   Margin="0,0,0,8" TextWrapping="Wrap" />
+
+                        <StackPanel Margin="0,0,0,12">
+                            <CheckBox x:Name="TakeOverStatusLineBox"
+                                      Content="Use Drover for Claude Code statusLine (overrides ccstatusline / others)"
+                                      Foreground="{StaticResource Chrome.Text}" />
+                            <TextBlock Text="Lets Drover receive context %, rate limits, cost, and lines added/removed from CC. Backs up any existing statusLine entry; restored when this is turned off."
+                                       Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                       Margin="20,2,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Shortcuts">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0"
+                               Text="Format: Ctrl+Shift+P, Ctrl+Shift+F, F2 — restart not required."
+                               Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                               Margin="0,0,0,8" TextWrapping="Wrap" />
+
+                    <ScrollViewer Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <Grid Margin="0,0,8,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Command palette" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="0" Grid.Column="1" x:Name="ScPalette" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Cycle tab →" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="1" Grid.Column="1" x:Name="ScCycleNext" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Cycle tab ←" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="2" Grid.Column="1" x:Name="ScCyclePrev" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Rename tab" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="3" Grid.Column="1" x:Name="ScRename" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Find in tab" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="4" Grid.Column="1" x:Name="ScFind" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Global find" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="5" Grid.Column="1" x:Name="ScGlobalFind" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Settings" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="6" Grid.Column="1" x:Name="ScSettings" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Detach probe" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="7" Grid.Column="1" x:Name="ScDetach" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Toggle plan panel" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="8" Grid.Column="1" x:Name="ScPlanPanel" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Toggle task panel" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="9" Grid.Column="1" x:Name="ScTaskPanel" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Toggle file explorer" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="10" Grid.Column="1" x:Name="ScFileExplorerPanel" Margin="0,0,0,6" Padding="4" />
+                        </Grid>
+                    </ScrollViewer>
+
+                    <Button Grid.Row="2" HorizontalAlignment="Left" Margin="0,8,0,0"
+                            Padding="10,4" Content="Reset to defaults" Click="ResetShortcuts_Click" />
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" Padding="12,4" Margin="0,0,8,0" IsCancel="True" />
+            <Button Content="Save"   Padding="12,4" IsDefault="True" Click="Save_Click" />
+        </StackPanel>
+    </Grid>
+</Window>
