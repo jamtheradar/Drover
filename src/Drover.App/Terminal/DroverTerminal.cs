@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Terminal.Wpf;
 
@@ -41,6 +42,8 @@ public class DroverTerminal : UserControl
     /// intercept delegates and direct PTY writes.
     /// </summary>
     public ConPtyConnection? Connection { get; private set; }
+
+    private TerminalDropHook? _dropHook;
 
     public string StartupCommandLine
     {
@@ -128,6 +131,37 @@ public class DroverTerminal : UserControl
             Terminal.Connection = pty;
             pty.RaiseRendererOutput("\x1b[?9001h");
             pty.Resize(Terminal.Columns, Terminal.Rows);
+            TryInstallDropHook();
         });
+    }
+
+    private void TryInstallDropHook()
+    {
+        if (_dropHook is not null) return;
+        _dropHook = TerminalDropHook.TryInstall(Terminal, OnFilesDropped);
+        if (_dropHook is null)
+        {
+            // HwndHost wasn't realized yet — retry on the next render frame.
+            Dispatcher.BeginInvoke(new Action(TryInstallDropHook),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
+    private void OnFilesDropped(string[] paths)
+    {
+        if (Connection is not { } pty || paths.Length == 0) return;
+
+        // Quote each path; space-separate. No newline — let the user submit.
+        // Bracketed paste markers prevent CC's TUI from interpreting embedded
+        // characters as commands during the splat.
+        var sb = new System.Text.StringBuilder();
+        sb.Append("\x1b[200~");
+        for (int i = 0; i < paths.Length; i++)
+        {
+            if (i > 0) sb.Append(' ');
+            sb.Append('"').Append(paths[i]).Append('"');
+        }
+        sb.Append("\x1b[201~");
+        pty.WriteToTerm(sb.ToString().AsSpan());
     }
 }

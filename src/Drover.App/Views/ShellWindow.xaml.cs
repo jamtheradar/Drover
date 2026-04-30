@@ -109,13 +109,67 @@ public partial class ShellWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Escape) return;
-        if (DataContext is not ShellViewModel vm) return;
-        if (!vm.DashboardActive && !vm.TokenomicsActive && !vm.MemoryActive) return;
-        vm.DashboardActive = false;
-        vm.TokenomicsActive = false;
-        vm.MemoryActive = false;
-        e.Handled = true;
+        // Escape closes any open overlay.
+        if (e.Key == Key.Escape)
+        {
+            if (DataContext is not ShellViewModel vm) return;
+            if (!vm.DashboardActive && !vm.TokenomicsActive && !vm.MemoryActive) return;
+            vm.DashboardActive = false;
+            vm.TokenomicsActive = false;
+            vm.MemoryActive = false;
+            e.Handled = true;
+            return;
+        }
+
+        // Tab / Shift+Tab / arrow keys are intercepted by WPF's focus-traversal
+        // and directional-navigation logic (HwndHost.TranslateAccelerator) before
+        // they reach the terminal HWND, so Claude Code's Shift+Tab (cycle modes)
+        // and history-navigation arrows silently move WPF focus instead. Catch
+        // them at PreviewKeyDown — same pattern proven to work for Escape — and
+        // forward the corresponding VT byte sequence to the focused tab's PTY.
+        // Modified Tab (Ctrl/Alt) is left alone so app shortcuts keep working.
+        if (Keyboard.Modifiers != ModifierKeys.None &&
+            Keyboard.Modifiers != ModifierKeys.Shift)
+        {
+            return;
+        }
+
+        var seq = e.Key switch
+        {
+            Key.Tab => (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift ? "\x1b[Z" : "\t",
+            Key.Up => "\x1b[A",
+            Key.Down => "\x1b[B",
+            Key.Right => "\x1b[C",
+            Key.Left => "\x1b[D",
+            _ => null
+        };
+        if (seq is null) return;
+
+        var tab = ResolveFocusedTab();
+        if (tab is null) return;
+
+        if (tab.SendInput(seq, appendReturn: false))
+            e.Handled = true;
+    }
+
+    /// <summary>
+    /// Walks up from the keyboard-focused element to find the
+    /// <see cref="TerminalTabView"/> (each terminal pane's wrapper) and
+    /// returns the bound <see cref="TerminalTabViewModel"/>. Falls back to
+    /// the shell's SelectedTab if no terminal is currently in the focus path
+    /// (e.g. focus is on a filter box).
+    /// </summary>
+    private TerminalTabViewModel? ResolveFocusedTab()
+    {
+        if (Keyboard.FocusedElement is DependencyObject d)
+        {
+            for (var cur = d; cur is not null; cur = System.Windows.Media.VisualTreeHelper.GetParent(cur))
+            {
+                if (cur is TerminalTabView tv && tv.DataContext is TerminalTabViewModel vm)
+                    return vm;
+            }
+        }
+        return (DataContext as ShellViewModel)?.SelectedTab;
     }
 
     private readonly System.Collections.Generic.List<KeyBinding> _shortcutBindings = new();
