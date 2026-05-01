@@ -334,6 +334,8 @@
         <term:DroverTerminal Grid.Row="1"
                              x:Name="Terminal"
                              StartupCommandLine="{Binding StartupCommandLine}"
+                             StartupWorkingDirectory="{Binding StartupWorkingDirectory}"
+                             StartupEnvironment="{Binding StartupEnvironment}"
                              FontFamilyWhenSettingTheme="{Binding FontFamily}"
                              FontSizeWhenSettingTheme="{Binding FontSize}"
                              Theme="{Binding Theme}" />

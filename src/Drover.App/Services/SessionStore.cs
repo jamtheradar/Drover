@@ -81,7 +81,11 @@ public sealed class SessionStore
                     settings.FontFamily,
                     settings.FontSize,
                     resume: settings.ResumeOnRestore,
-                    hooksUrl: _hooks.Url);
+                    hooksUrl: _hooks.Url,
+                    claudeExecutablePath: settings.ClaudeExecutablePath,
+                    defaultClaudeModel: settings.DefaultClaudeModel,
+                    globalEnvVars: settings.GlobalEnvVars,
+                    logOptions: new SessionLogOptions(settings.LogKeepCount, settings.LogByteBudgetMb));
                 _hooks.Register(tab.SessionId, tab.OnHookEvent);
                 _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
                 tab.StatusLineUpdated += _shell.OnTabStatusLineUpdated;

@@ -17,11 +17,13 @@ namespace Drover.App.Views;
 /// ContentPresenter and swaps DataContext — which unloads hosted controls like
 /// DroverTerminal on every tab switch, tearing down their PTYs.
 /// Also supports drag-reorder on the tab headers by calling Move(int,int) on the
-/// underlying ObservableCollection via reflection.
+/// underlying ObservableCollection via reflection, plus tear-off into a
+/// <see cref="PoppedOutWindow"/> when the drag escapes the strip far enough.
 /// </summary>
 public class TabControlEx : TabControl
 {
     private const double DragThreshold = 6.0;
+    private const double TearOffThreshold = 60.0;
 
     private Panel? _itemsHolder;
     private Point _dragStart;
@@ -65,10 +67,55 @@ public class TabControlEx : TabControl
         if (Math.Abs(pos.X - _dragStart.X) < DragThreshold && Math.Abs(pos.Y - _dragStart.Y) < DragThreshold)
             return;
 
+        if (ShouldTearOff(pos))
+        {
+            TryTearOff(_draggingTab);
+            return;
+        }
+
         var over = HitTestTabItem(pos);
         if (over is null || ReferenceEquals(over, _draggingTab)) return;
 
         MoveItem(_draggingTab.DataContext, over.DataContext);
+    }
+
+    private bool ShouldTearOff(Point pos)
+    {
+        double stripBottom = 0;
+        if (_itemsHolder is not null && _itemsHolder.IsVisible)
+        {
+            try
+            {
+                var origin = _itemsHolder.TransformToAncestor(this).Transform(new Point(0, 0));
+                stripBottom = origin.Y;
+            }
+            catch
+            {
+                // not yet visual-rooted
+            }
+        }
+        if (stripBottom <= 0) stripBottom = 60;
+
+        return pos.Y > stripBottom + TearOffThreshold
+            || pos.Y < -TearOffThreshold
+            || pos.X < -TearOffThreshold
+            || pos.X > ActualWidth + TearOffThreshold;
+    }
+
+    private void TryTearOff(TabItem ti)
+    {
+        // Snapshot and clear before reparenting so OnTabMouseMove no-ops on
+        // any further drag deltas while the popped-out window is materialising.
+        var tab = ti.DataContext as Drover.App.ViewModels.TerminalTabViewModel;
+        _draggingTab = null;
+        if (ti.IsMouseCaptured) ti.ReleaseMouseCapture();
+        if (Mouse.Captured is not null) Mouse.Capture(null);
+
+        if (tab is null) return;
+        if (Window.GetWindow(this) is ShellWindow shell)
+        {
+            shell.PopOutTab(tab);
+        }
     }
 
     private void OnTabMouseUp(object sender, MouseButtonEventArgs e)

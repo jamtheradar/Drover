@@ -51,14 +51,16 @@ public sealed class ConPtyConnection : ITerminalConnection, IDisposable
     /// caller's thread until the child exits or the output pipe closes.
     /// Call from a worker thread.
     /// </summary>
-    public void Start(string command, int columns, int rows)
+    public void Start(string command, int columns, int rows,
+        string? workingDirectory = null,
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? environmentOverrides = null)
     {
         if (IsStarted) throw new InvalidOperationException("ConPtyConnection already started.");
 
         _inputPipe = new PseudoConsolePipe();
         _outputPipe = new PseudoConsolePipe();
         _console = PseudoConsole.Create(_inputPipe.ReadSide, _outputPipe.WriteSide, columns, rows);
-        _process = ChildProcess.Start(command, _console);
+        _process = ChildProcess.Start(command, _console, workingDirectory, environmentOverrides);
         _outputStream = new FileStream(_outputPipe.ReadSide, FileAccess.Read);
         _inputWriter = new StreamWriter(new FileStream(_inputPipe.WriteSide, FileAccess.Write))
         {

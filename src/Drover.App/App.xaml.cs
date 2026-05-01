@@ -17,6 +17,10 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        InstallGlobalExceptionHandlers();
+
+        AppLog.PruneOlderThan(TimeSpan.FromDays(30));
+
         MigrateLegacyAppData();
 
         if (!PrerequisitesCheck.IsPwshOnPath())
@@ -43,11 +47,13 @@ public partial class App : Application
                 services.AddSingleton<ProjectsCatalog>();
                 services.AddSingleton<SessionStore>();
                 services.AddSingleton<SettingsStore>();
+                services.AddSingleton<MarkdownThemeProvider>();
                 services.AddSingleton<ToastNotifier>();
                 services.AddSingleton<ActivityLog>();
                 services.AddSingleton<HooksGateway>();
                 services.AddSingleton<HooksInstaller>();
                 services.AddSingleton<TokenStats>();
+                services.AddSingleton<GitStatusService>();
                 services.AddSingleton<TrayIconService>();
                 services.AddSingleton<UpdateService>();
                 services.AddSingleton<ShellViewModel>();
@@ -57,6 +63,17 @@ public partial class App : Application
 
         // Touch the ToastNotifier early so OnActivated is wired before any toast fires.
         _host.Services.GetRequiredService<ToastNotifier>();
+
+        // Seed Application.Resources MdTheme.* brushes before any window renders, so
+        // PlanPanel's DynamicResource bindings resolve on first paint instead of
+        // flashing blank until the editor is first instantiated.
+        _host.Services.GetRequiredService<MarkdownThemeProvider>();
+
+        // GitStatusService is constructed by ShellViewModel via DI (it watches projects
+        // from its ctor), but Start() is what kicks the polling timer and the git probe.
+        // Resolve here so the singleton is materialised before ShellViewModel asks for it
+        // and start it post-resolve so polling begins on launch.
+        _host.Services.GetRequiredService<GitStatusService>().Start();
 
         // Start the hooks gateway. Failure to start (port collision) is non-fatal —
         // tabs simply launch without DROVER_HOOKS_URL set, and OSC monitoring carries on.
@@ -221,6 +238,48 @@ public partial class App : Application
         if (delta.TotalHours < 24) return $"{(int)delta.TotalHours}h ago";
         if (delta.TotalDays < 7) return $"{(int)delta.TotalDays}d ago";
         return local.ToString("MMM d");
+    }
+
+    // Three sources of unhandled exceptions in a WPF app: the dispatcher (UI thread),
+    // arbitrary background threads (terminal AttentionMonitor, hooks gateway, file
+    // watchers, etc.), and faulted Tasks nobody awaited. All three feed AppLog so we
+    // get a record at %APPDATA%\Drover\logs\app.log instead of a silent crash.
+    //
+    // Dispatcher exceptions are marked Handled = true so a single bad event handler
+    // doesn't tear down the whole app — the user sees a one-shot message and the
+    // shell stays up. AppDomain unhandled is terminating by definition; we just log.
+    private void InstallGlobalExceptionHandlers()
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            AppLog.Error("Dispatcher", "Unhandled exception on UI thread.", args.Exception);
+            try
+            {
+                MessageBox.Show(
+                    $"An unexpected error occurred:\n\n{args.Exception.Message}\n\nDetails were written to:\n{AppLog.LogFilePath}",
+                    "Drover",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            catch { /* if even MessageBox fails, the log still has the trace */ }
+            args.Handled = true;
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            var ex = args.ExceptionObject as Exception;
+            AppLog.Error("AppDomain",
+                $"Unhandled exception (terminating={args.IsTerminating}).",
+                ex);
+        };
+
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            AppLog.Error("Task", "Unobserved task exception.", args.Exception);
+            args.SetObserved();
+        };
+
+        AppLog.Info("App", $"Started Drover {AppInfo.Version}.");
     }
 
     // One-shot rename of %APPDATA%\Ccc → %APPDATA%\Drover for users carried over from the

@@ -6,6 +6,13 @@ using Drover.App.Terminal;
 namespace Drover.App.Services;
 
 /// <summary>
+/// Retention knobs for <see cref="SessionLogger"/>. KeepCount=0 disables the count cap;
+/// ByteBudgetMb=0 disables the byte cap. Defaults match the historical 50-files / 500MB
+/// policy that was hardcoded before per-user knobs existed.
+/// </summary>
+public sealed record SessionLogOptions(int KeepCount = 50, int ByteBudgetMb = 500);
+
+/// <summary>
 /// Tees the terminal's output stream to a per-session log file under %APPDATA%\Drover\logs.
 /// Stores the raw VT stream — useful for scrollback search even after the terminal's
 /// rendered buffer rolls off. Chains the existing InterceptOutputToUITerminal so it
@@ -33,27 +40,38 @@ public sealed class SessionLogger : IDisposable
 
     public string Path { get; }
 
-    public SessionLogger(DroverTerminal control, string tabTitle)
+    public SessionLogger(DroverTerminal control, string tabTitle, SessionLogOptions? options = null)
     {
         _control = control;
+        var opts = options ?? new SessionLogOptions();
         var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Drover", "logs");
         Directory.CreateDirectory(dir);
-        PruneOldLogs(dir, keep: 50);
+        var byteBudget = opts.ByteBudgetMb <= 0 ? long.MaxValue : (long)opts.ByteBudgetMb * 1024 * 1024;
+        var keepCount = opts.KeepCount <= 0 ? int.MaxValue : opts.KeepCount;
+        PruneOldLogs(dir, keepCount, byteBudget);
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var safeTitle = Sanitize(tabTitle);
         Path = System.IO.Path.Combine(dir, $"{stamp}_{safeTitle}.log");
     }
 
-    private static void PruneOldLogs(string dir, int keep)
+    private static void PruneOldLogs(string dir, int keepCount, long byteBudget)
     {
         try
         {
             var files = new DirectoryInfo(dir).GetFiles("*.log");
-            if (files.Length <= keep) return;
+            if (files.Length == 0) return;
             System.Array.Sort(files, (a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
-            for (int i = keep; i < files.Length; i++)
+
+            long running = 0;
+            for (int i = 0; i < files.Length; i++)
             {
-                try { files[i].Delete(); } catch { /* in use / locked — skip */ }
+                running += files[i].Length;
+                bool overCount = i >= keepCount;
+                bool overBytes = running > byteBudget;
+                if (overCount || overBytes)
+                {
+                    try { files[i].Delete(); } catch { /* in use / locked — skip */ }
+                }
             }
         }
         catch { /* enumeration failed — non-fatal */ }

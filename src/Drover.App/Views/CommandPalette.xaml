@@ -19,16 +19,23 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <TextBox Grid.Row="0"
-                     x:Name="FilterBox"
-                     Padding="12,10"
-                     FontSize="14"
-                     Background="#1e1e1e"
-                     Foreground="#ddd"
-                     BorderThickness="0,0,0,1"
-                     BorderBrush="#333"
-                     TextChanged="FilterBox_TextChanged"
-                     PreviewKeyDown="FilterBox_PreviewKeyDown" />
+            <Grid Grid.Row="0">
+                <TextBox x:Name="FilterBox"
+                         Padding="12,10"
+                         FontSize="14"
+                         Background="#1e1e1e"
+                         Foreground="#ddd"
+                         BorderThickness="0,0,0,1"
+                         BorderBrush="#333"
+                         TextChanged="FilterBox_TextChanged"
+                         PreviewKeyDown="FilterBox_PreviewKeyDown" />
+                <TextBlock x:Name="PlaceholderHint"
+                           Text="Type to filter · &gt; send to one tab · &gt;&gt; broadcast to all"
+                           Foreground="#666"
+                           FontSize="13"
+                           Padding="14,11"
+                           IsHitTestVisible="False" />
+            </Grid>
             <ListBox Grid.Row="1"
                      x:Name="Results"
                      Background="Transparent"

@@ -44,8 +44,16 @@ public static class HistoryExporter
         // sees right now, not what the writer happened to flush 250 ms ago.
         tab.FlushSessionLog();
 
+        // FileShare.ReadWrite — SessionLogger keeps a StreamWriter open on this
+        // file with FileAccess.Write, so the default FileShare.Read used by
+        // File.ReadAllText would throw a sharing violation.
         string raw;
-        try { raw = File.ReadAllText(src, Encoding.UTF8); }
+        try
+        {
+            using var fs = new FileStream(src, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(fs, Encoding.UTF8);
+            raw = reader.ReadToEnd();
+        }
         catch { return null; }
 
         var stripped = Strip(raw);

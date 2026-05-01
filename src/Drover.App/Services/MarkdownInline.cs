@@ -98,3 +98,46 @@ public static class InlineMd
         foreach (var inl in MarkdownInline.Parse(s)) tb.Inlines.Add(inl);
     }
 }
+
+/// <summary>
+/// Attached property for plan section headings: splits a leading numeric
+/// prefix (e.g. "1.", "2.1", "3.2.1") and renders it with the TextBlock's
+/// inherited heading brush, while the remaining body is rendered Bold and
+/// in the theme's foreground colour. Falls back to plain text when no
+/// numeric prefix is present.
+/// </summary>
+public static class HeadingMd
+{
+    private static readonly Regex NumberPrefixRx = new(
+        @"^(?<num>\d+(?:\.\d+)*\.?)\s+(?<rest>.*)$",
+        RegexOptions.Compiled);
+
+    public static readonly DependencyProperty SourceProperty = DependencyProperty.RegisterAttached(
+        "Source", typeof(string), typeof(HeadingMd),
+        new PropertyMetadata(null, OnSourceChanged));
+
+    public static string? GetSource(DependencyObject d) => (string?)d.GetValue(SourceProperty);
+    public static void SetSource(DependencyObject d, string? v) => d.SetValue(SourceProperty, v);
+
+    private static void OnSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not TextBlock tb) return;
+        tb.Inlines.Clear();
+        var s = e.NewValue as string;
+        if (string.IsNullOrEmpty(s)) return;
+
+        var m = NumberPrefixRx.Match(s);
+        if (!m.Success)
+        {
+            tb.Inlines.Add(new Run(s));
+            return;
+        }
+
+        var num = new Run(m.Groups["num"].Value + " ");
+        num.SetResourceReference(TextElement.ForegroundProperty, "MdTheme.OrderedListMark");
+        tb.Inlines.Add(num);
+        var body = new Bold(new Run(m.Groups["rest"].Value));
+        body.SetResourceReference(TextElement.ForegroundProperty, "MdTheme.Foreground");
+        tb.Inlines.Add(body);
+    }
+}

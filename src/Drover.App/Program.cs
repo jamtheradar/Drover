@@ -1,3 +1,4 @@
+using Drover.App.Services;
 using Velopack;
 
 namespace Drover.App;
@@ -11,7 +12,9 @@ public static class Program
         // installer/updater bootstrapper with --veloapp-* args, this handles them
         // and exits without showing a window. In normal launches it returns
         // immediately and we proceed to start WPF.
-        VelopackApp.Build().Run();
+        VelopackApp.Build()
+            .SetLogger(AppLog.VelopackLogger)
+            .Run();
 
         var app = new App();
         app.InitializeComponent();

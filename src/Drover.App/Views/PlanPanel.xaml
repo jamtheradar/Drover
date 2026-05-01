@@ -174,8 +174,11 @@
                 Content="Read plan and create tasks"
                 Command="{Binding ReadPlanAndCreateTasksCommand}" />
 
-        <!-- Body / empty / edit-mode -->
-        <Grid Grid.Row="2">
+        <!-- Body / empty / edit-mode — backed by the active markdown theme so toggling
+             between rendered viewer and AvalonEdit keeps a coherent palette. -->
+        <Grid Grid.Row="2"
+              Background="{DynamicResource MdTheme.Background}"
+              TextBlock.Foreground="{DynamicResource MdTheme.Foreground}">
             <!-- Edit mode -->
             <Grid Visibility="{Binding PlanEditMode, Converter={StaticResource BoolToVis}}">
                 <Grid.RowDefinitions>
@@ -212,7 +215,7 @@
                 </StackPanel.Style>
                 <TextBlock Text="No plan file in this project"
                            HorizontalAlignment="Center"
-                           Foreground="{StaticResource Chrome.TextMuted}"
+                           Foreground="{DynamicResource MdTheme.Muted}"
                            Margin="0,0,0,12" />
                 <Button Content="Create from template"
                         Padding="10,4"
@@ -248,14 +251,15 @@
                                         Command="{Binding DataContext.SendTaskCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                         CommandParameter="{Binding}">
                                     <DockPanel LastChildFill="True">
-                                        <TextBlock DockPanel.Dock="Left" Margin="6,0,8,0"
-                                                   Foreground="{StaticResource Chrome.TextMuted}">
+                                        <TextBlock DockPanel.Dock="Left" Margin="6,0,8,0">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="Text" Value="☐" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource MdTheme.TaskOpen}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsDone}" Value="True">
                                                             <Setter Property="Text" Value="☑" />
+                                                            <Setter Property="Foreground" Value="{DynamicResource MdTheme.TaskDone}" />
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -289,13 +293,13 @@
                                             CommandParameter="{Binding}"
                                             ToolTip="{Binding Summary}">
                                         <StackPanel>
-                                            <TextBlock Text="{Binding Heading}"
+                                            <TextBlock svc:HeadingMd.Source="{Binding Heading}"
                                                        FontWeight="SemiBold"
                                                        FontSize="13"
-                                                       Foreground="#8AB4F8"
+                                                       Foreground="{DynamicResource MdTheme.Heading}"
                                                        TextWrapping="Wrap" />
                                             <TextBlock svc:InlineMd.Source="{Binding Summary}"
-                                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                                       Foreground="{DynamicResource MdTheme.Muted}"
                                                        FontSize="11"
                                                        TextWrapping="Wrap"
                                                        TextTrimming="CharacterEllipsis"
@@ -310,14 +314,15 @@
                                                         Command="{Binding DataContext.SendTaskCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                         CommandParameter="{Binding}">
                                                     <DockPanel LastChildFill="True">
-                                                        <TextBlock DockPanel.Dock="Left" Margin="6,0,8,0"
-                                                                   Foreground="{StaticResource Chrome.TextMuted}">
+                                                        <TextBlock DockPanel.Dock="Left" Margin="6,0,8,0">
                                                             <TextBlock.Style>
                                                                 <Style TargetType="TextBlock">
                                                                     <Setter Property="Text" Value="☐" />
+                                                                    <Setter Property="Foreground" Value="{DynamicResource MdTheme.TaskOpen}" />
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsDone}" Value="True">
                                                                             <Setter Property="Text" Value="☑" />
+                                                                            <Setter Property="Foreground" Value="{DynamicResource MdTheme.TaskDone}" />
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>

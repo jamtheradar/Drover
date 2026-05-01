@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Drover.App.Services;
 
 public sealed record WindowPlacement(
@@ -39,7 +41,24 @@ public sealed record AppSettings(
     // Last app version for which the user dismissed the What's New dialog. Empty
     // means they've never seen it; on startup we compare against AppInfo.Version
     // and pop the dialog once when they differ.
-    string LastSeenVersion = "");
+    string LastSeenVersion = "",
+    // Override for the `claude` executable used to launch Claude tabs. When set,
+    // replaces the bare "claude" command in the pwsh wrapper. Leave blank to rely
+    // on PATH resolution. Per-project Command still takes precedence.
+    string ClaudeExecutablePath = "",
+    // Default --model flag appended to Claude tabs that don't carry a per-project
+    // override. Empty = let Claude pick its default. Per-project Args/Model wins.
+    string DefaultClaudeModel = "",
+    // KEY=VALUE pairs injected into every Claude/pwsh launch ahead of per-project
+    // env. Useful for ANTHROPIC_API_KEY, NO_COLOR, proxy vars, etc.
+    Dictionary<string, string>? GlobalEnvVars = null,
+    // Session-log retention. SessionLogger prunes oldest files when either limit
+    // is exceeded. 0 = no count cap; 0 MB = no byte cap.
+    int LogKeepCount = 50,
+    int LogByteBudgetMb = 500,
+    // When true, registers a HKCU\...\Run entry pointing at this exe so Drover
+    // launches at sign-in. The toggle writes the registry on Save.
+    bool StartWithWindows = false);
 
 public sealed record KeyboardShortcuts(
     string CommandPalette = "Ctrl+Shift+P",
@@ -49,7 +68,6 @@ public sealed record KeyboardShortcuts(
     string FindInTab = "Ctrl+F",
     string GlobalFind = "Ctrl+Shift+F",
     string Settings = "Ctrl+OemComma",
-    string DetachProbe = "Ctrl+Shift+D",
     string TogglePlanPanel = "Alt+P",
     string ToggleTaskPanel = "Ctrl+Shift+T",
     string ToggleFileExplorerPanel = "Alt+E");

@@ -58,6 +58,14 @@
                 <TextBlock x:Name="UpdateStatusText" FontSize="11"
                            Foreground="{StaticResource Chrome.TextMuted}"
                            Margin="0,0,0,6" />
+                <Button Content="Open logs folder"
+                        Click="OpenLogs_Click"
+                        HorizontalAlignment="Left"
+                        Padding="0" Margin="0,0,0,6"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Foreground="{StaticResource Chrome.Text}"
+                        Cursor="Hand" />
                 <TextBlock x:Name="BuildText" FontSize="10"
                            Foreground="{StaticResource Chrome.TextMuted}" />
             </StackPanel>

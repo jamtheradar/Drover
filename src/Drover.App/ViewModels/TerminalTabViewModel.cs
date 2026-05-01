@@ -25,6 +25,24 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     [ObservableProperty] private double _sessionCost;
     [ObservableProperty] private bool _hooksInstalled;
 
+    // Git status (populated by GitStatusService polling, raised through ShellViewModel).
+    // Empty when the project root isn't a git repo or git isn't on PATH.
+    [ObservableProperty] private string _gitText = string.Empty;
+    [ObservableProperty] private bool _gitDirty;
+    [ObservableProperty] private bool _gitHasRepo;
+
+    // Permission-prompt strip text. Populated from a Notification hook event's
+    // `message` field; cleared when any other hook arrives (the user has moved
+    // on — UserPromptSubmit / Stop / a tool call). XAML binds the strip's
+    // visibility to the non-empty/empty state of this string.
+    [ObservableProperty] private string _permissionPromptText = string.Empty;
+
+    // One-line live activity strip — "Reading file…", "Running bash…" — derived
+    // from PreToolUse / PostToolUse hooks. Cleared on Stop / SessionStart, or
+    // after ~3s of silence (decay timer) so a long-running response between
+    // tool calls doesn't leave stale text on the header.
+    [ObservableProperty] private string _currentToolText = string.Empty;
+
     // CC-pushed status fields (from the configured statusLine command).
     // These are authoritative when set — CC owns the numbers; we just display.
     // Untouched when CC hasn't pushed (e.g. < v2.1.97 or statusLine not installed).
@@ -51,6 +69,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
 
     private DateTime? _workingSince;
     private DispatcherTimer? _workingTimer;
+    private DispatcherTimer? _toolDecayTimer;
 
     // True once a statusLine push has supplied an authoritative effort.level (or a
     // thinking.enabled=false). Polled transcript scanning won't overwrite EffortText
@@ -69,7 +88,11 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         int? fontSize = null,
         bool resume = false,
         string? hooksUrl = null,
-        bool dangerouslySkipPermissions = false)
+        bool dangerouslySkipPermissions = false,
+        string? claudeExecutablePath = null,
+        string? defaultClaudeModel = null,
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? globalEnvVars = null,
+        Drover.App.Services.SessionLogOptions? logOptions = null)
     {
         Project = project;
         _title = title ?? project.Name;
@@ -78,6 +101,10 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         Resume = resume;
         HooksUrl = hooksUrl;
         DangerouslySkipPermissions = dangerouslySkipPermissions;
+        ClaudeExecutablePath = claudeExecutablePath;
+        DefaultClaudeModel = defaultClaudeModel;
+        GlobalEnvVars = globalEnvVars;
+        LogOptions = logOptions;
         SessionId = Guid.NewGuid().ToString("N");
     }
 
@@ -87,6 +114,10 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     public bool Resume { get; }
     public string? HooksUrl { get; }
     public bool DangerouslySkipPermissions { get; }
+    public string? ClaudeExecutablePath { get; }
+    public string? DefaultClaudeModel { get; }
+    public System.Collections.Generic.IReadOnlyDictionary<string, string>? GlobalEnvVars { get; }
+    public Drover.App.Services.SessionLogOptions? LogOptions { get; }
     public string SessionId { get; }
 
     /// <summary>
@@ -136,10 +167,26 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// </summary>
     public void FlushSessionLog() => _logger?.Flush();
 
+    /// <summary>True for Claude-flavored kinds (Claude, ClaudeDirect) — controls whether
+    /// CLAUDE_CODE_NO_FLICKER, --model/--resume/--dangerously-skip-permissions, and the
+    /// implicit "claude" command apply.</summary>
+    private bool IsClaudeKind => Project.Kind is ProjectKind.Claude or ProjectKind.ClaudeDirect;
+
     public string StartupCommandLine
     {
         get
         {
+            // Raw override — user owns shell, cwd, env. Used to experiment with cmd.exe /
+            // git-bash / nu / direct claude.exe etc. for input-latency testing.
+            if (!string.IsNullOrWhiteSpace(Project.LaunchCommand))
+                return Project.LaunchCommand!;
+
+            // ClaudeDirect: skip the pwsh wrapper entirely. Working directory and env vars
+            // ride on CreateProcess's lpCurrentDirectory/lpEnvironment (see StartupWorkingDirectory
+            // and StartupEnvironment below).
+            if (Project.Kind == ProjectKind.ClaudeDirect)
+                return BuildDirectClaudeCommand();
+
             var sb = new StringBuilder();
             if (Project.Kind == ProjectKind.Claude)
                 sb.Append("$env:CLAUDE_CODE_NO_FLICKER=1; ");
@@ -150,6 +197,12 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
             if (!string.IsNullOrEmpty(HooksUrl))
                 sb.Append($"$env:DROVER_HOOKS_URL='{EscapeSingleQuote(HooksUrl!)}'; ");
 
+            // Global env first, then per-project overrides — project values win.
+            if (GlobalEnvVars is { Count: > 0 })
+            {
+                foreach (var kv in GlobalEnvVars)
+                    sb.Append($"$env:{kv.Key}='{EscapeSingleQuote(kv.Value)}'; ");
+            }
             if (Project.EnvVars is { Count: > 0 })
             {
                 foreach (var kv in Project.EnvVars)
@@ -160,13 +213,27 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
 
             var command = Project.Command;
             if (string.IsNullOrWhiteSpace(command) && Project.Kind == ProjectKind.Claude)
-                command = "claude";
+            {
+                command = !string.IsNullOrWhiteSpace(ClaudeExecutablePath)
+                    ? $"& '{EscapeSingleQuote(ClaudeExecutablePath!)}'"
+                    : "claude";
+            }
 
             if (!string.IsNullOrWhiteSpace(command))
             {
                 sb.Append("; ").Append(command);
                 if (!string.IsNullOrWhiteSpace(Project.Args))
                     sb.Append(' ').Append(Project.Args);
+                if (Project.Kind == ProjectKind.Claude
+                    && string.IsNullOrWhiteSpace(Project.Command)
+                    && !ContainsModelFlag(Project.Args))
+                {
+                    var model = !string.IsNullOrWhiteSpace(Project.Model)
+                        ? Project.Model
+                        : DefaultClaudeModel;
+                    if (!string.IsNullOrWhiteSpace(model))
+                        sb.Append(" --model ").Append(model);
+                }
                 if (Resume && Project.Kind == ProjectKind.Claude)
                     sb.Append(" --resume");
                 if (DangerouslySkipPermissions && Project.Kind == ProjectKind.Claude)
@@ -177,7 +244,73 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Working directory passed to CreateProcess for ClaudeDirect tabs. Null for shell-
+    /// wrapped kinds (the wrapper handles cd).</summary>
+    public string? StartupWorkingDirectory =>
+        Project.Kind == ProjectKind.ClaudeDirect && string.IsNullOrWhiteSpace(Project.LaunchCommand)
+            ? Project.Path
+            : null;
+
+    /// <summary>Environment overrides for ClaudeDirect tabs — the same DROVER_SESSION_ID /
+    /// DROVER_HOOKS_URL / global+per-project vars the pwsh wrapper would set, but layered onto
+    /// the parent env via CreateProcess's lpEnvironment instead.</summary>
+    public System.Collections.Generic.IReadOnlyDictionary<string, string>? StartupEnvironment
+    {
+        get
+        {
+            if (Project.Kind != ProjectKind.ClaudeDirect) return null;
+            if (!string.IsNullOrWhiteSpace(Project.LaunchCommand)) return null;
+            var env = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["CLAUDE_CODE_NO_FLICKER"] = "1",
+                ["DROVER_SESSION_ID"] = SessionId,
+            };
+            if (!string.IsNullOrEmpty(HooksUrl)) env["DROVER_HOOKS_URL"] = HooksUrl!;
+            if (GlobalEnvVars is { Count: > 0 })
+                foreach (var kv in GlobalEnvVars) env[kv.Key] = kv.Value;
+            if (Project.EnvVars is { Count: > 0 })
+                foreach (var kv in Project.EnvVars) env[kv.Key] = kv.Value;
+            return env;
+        }
+    }
+
+    /// <summary>Builds the bare command line for ClaudeDirect mode — the claude executable plus
+    /// args/--model/--resume/--dangerously-skip-permissions. No shell, no cd, no env setup;
+    /// those land via CreateProcess parameters.</summary>
+    private string BuildDirectClaudeCommand()
+    {
+        var sb = new StringBuilder();
+        var command = Project.Command;
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            command = !string.IsNullOrWhiteSpace(ClaudeExecutablePath)
+                ? $"\"{ClaudeExecutablePath}\""
+                : "claude";
+        }
+        sb.Append(command);
+        if (!string.IsNullOrWhiteSpace(Project.Args))
+            sb.Append(' ').Append(Project.Args);
+        if (string.IsNullOrWhiteSpace(Project.Command) && !ContainsModelFlag(Project.Args))
+        {
+            var model = !string.IsNullOrWhiteSpace(Project.Model)
+                ? Project.Model
+                : DefaultClaudeModel;
+            if (!string.IsNullOrWhiteSpace(model))
+                sb.Append(" --model ").Append(model);
+        }
+        if (Resume) sb.Append(" --resume");
+        if (DangerouslySkipPermissions) sb.Append(" --dangerously-skip-permissions");
+        return sb.ToString();
+    }
+
     private static string EscapeSingleQuote(string s) => s.Replace("'", "''");
+
+    private static bool ContainsModelFlag(string? args)
+    {
+        if (string.IsNullOrWhiteSpace(args)) return false;
+        return args.Contains("--model", StringComparison.OrdinalIgnoreCase)
+            || System.Text.RegularExpressions.Regex.IsMatch(args, @"(^|\s)-m(\s|=|$)");
+    }
 
     public async Task AttachAsync(DroverTerminal control)
     {
@@ -186,7 +319,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         if (control.Connection is null) return;
         _control = control;
 
-        _logger = new SessionLogger(control, Title);
+        _logger = new SessionLogger(control, Title, LogOptions);
         _logger.Attach();
 
         _monitor = new AttentionMonitor(control);
@@ -210,6 +343,15 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     }
 
     public event EventHandler<(AttentionState previous, AttentionState next)>? AttentionChanged;
+
+    /// <summary>
+    /// Fires when a Claude Code <c>Notification</c> hook arrives — typically a
+    /// permission prompt awaiting user approval. The string is the hook's
+    /// <c>message</c> field (e.g. "Claude needs your permission to use Edit").
+    /// Used by the shell to raise a toast / taskbar flash distinct from the
+    /// generic working→idle transition.
+    /// </summary>
+    public event EventHandler<string>? PermissionPrompted;
 
     /// <summary>
     /// Fires after a Claude Code statusLine push has been parsed and the Cc* fields
@@ -439,6 +581,96 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
             _                  => (AttentionState?)null,
         };
         if (next is { } s) SetAttention(s);
+
+        // Permission-prompt strip lifecycle. Notification arrives → set the
+        // text; any other hook (Stop / UserPromptSubmit / a tool event) means
+        // the prompt has been resolved or superseded, so clear it. Marshal to
+        // UI thread because the gateway calls this from a background task.
+        if (evt.Type == "Notification")
+        {
+            var msg = string.IsNullOrWhiteSpace(evt.Message)
+                ? "Claude needs your attention"
+                : evt.Message!.Trim();
+            DispatchToUi(() =>
+            {
+                PermissionPromptText = msg;
+                PermissionPrompted?.Invoke(this, msg);
+            });
+        }
+        else if (next is not null && !string.IsNullOrEmpty(PermissionPromptText))
+        {
+            DispatchToUi(() => PermissionPromptText = string.Empty);
+        }
+
+        // Live activity strip. Pre/PostToolUse carry tool_name; surface a
+        // friendly one-liner ("Reading file…", "Running bash…") and (re)arm
+        // the decay timer. Stop / SessionStart clear it immediately.
+        if (evt.Type == "PreToolUse" || evt.Type == "PostToolUse")
+        {
+            if (!string.IsNullOrWhiteSpace(evt.Tool))
+            {
+                var label = FriendlyToolLabel(evt.Tool!);
+                DispatchToUi(() =>
+                {
+                    CurrentToolText = label;
+                    ArmToolDecay();
+                });
+            }
+        }
+        else if (evt.Type == "Stop" || evt.Type == "SessionStart")
+        {
+            DispatchToUi(() =>
+            {
+                CurrentToolText = string.Empty;
+                _toolDecayTimer?.Stop();
+            });
+        }
+    }
+
+    private static string FriendlyToolLabel(string tool) => tool switch
+    {
+        "Read"          => "Reading file…",
+        "Write"         => "Writing file…",
+        "Edit"          => "Editing file…",
+        "MultiEdit"     => "Editing file…",
+        "NotebookEdit"  => "Editing notebook…",
+        "Bash"          => "Running bash…",
+        "PowerShell"    => "Running pwsh…",
+        "Grep"          => "Searching code…",
+        "Glob"          => "Finding files…",
+        "WebFetch"      => "Fetching URL…",
+        "WebSearch"     => "Searching web…",
+        "Task"          => "Running subagent…",
+        "Agent"         => "Running subagent…",
+        "TodoWrite"     => "Updating todos…",
+        _               => $"Using {tool}…",
+    };
+
+    private void ArmToolDecay()
+    {
+        // Must run on UI thread — DispatcherTimer is dispatcher-affine.
+        if (_toolDecayTimer is null)
+        {
+            _toolDecayTimer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromSeconds(3)
+            };
+            _toolDecayTimer.Tick += (_, _) =>
+            {
+                _toolDecayTimer?.Stop();
+                CurrentToolText = string.Empty;
+            };
+        }
+        _toolDecayTimer.Stop();
+        _toolDecayTimer.Start();
+    }
+
+    private static void DispatchToUi(Action a)
+    {
+        var app = System.Windows.Application.Current;
+        if (app is null) return;
+        if (app.Dispatcher.CheckAccess()) a();
+        else app.Dispatcher.BeginInvoke(a);
     }
 
     private void SetAttention(AttentionState s)
@@ -488,11 +720,27 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
 
     public bool SendInput(string text, bool appendReturn = true)
     {
-        var pty = _control?.Connection;
+        var control = _control;
+        var pty = control?.Connection;
         if (pty is null) return false;
         var payload = appendReturn ? text + "\r" : text;
-        try { pty.WriteToTerm(payload); return true; }
+        try { pty.WriteToTerm(payload); }
         catch { return false; }
+        FocusTerminal(control);
+        return true;
+    }
+
+    // Move WPF keyboard focus to the terminal so a button-click that triggered
+    // SendInput doesn't leave the originating button focused — otherwise the
+    // user's next Enter re-fires that button's command (re-pasting the prompt).
+    // Defer to DispatcherPriority.Input so it lands after the click completes.
+    private static void FocusTerminal(DroverTerminal? control)
+    {
+        if (control is null) return;
+        var app = System.Windows.Application.Current;
+        if (app is null) return;
+        app.Dispatcher.BeginInvoke(new Action(() => control.Terminal.Focus()),
+            DispatcherPriority.Input);
     }
 
     private void UpdateWorkingTimer(AttentionState state)
@@ -535,6 +783,8 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     {
         _workingTimer?.Stop();
         _workingTimer = null;
+        _toolDecayTimer?.Stop();
+        _toolDecayTimer = null;
         _logger?.Dispose();
         _logger = null;
         _monitor = null;

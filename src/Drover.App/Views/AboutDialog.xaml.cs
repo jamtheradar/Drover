@@ -30,6 +30,29 @@ public partial class AboutDialog : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
+    private void OpenLogs_Click(object sender, RoutedEventArgs e)
+    {
+        // Use explorer.exe /select,<file> so the active app.log is highlighted on open.
+        // Falls back to opening the directory if the file doesn't exist yet (fresh install).
+        try
+        {
+            var path = AppLog.LogFilePath;
+            var arg = System.IO.File.Exists(path)
+                ? $"/select,\"{path}\""
+                : $"\"{System.IO.Path.GetDirectoryName(path)}\"";
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = arg,
+                UseShellExecute = true,
+            });
+        }
+        catch (System.Exception ex)
+        {
+            AppLog.Error("AboutDialog", "Failed to open logs folder.", ex);
+        }
+    }
+
     private void WhatsNew_Click(object sender, RoutedEventArgs e)
     {
         var win = new WhatsNewWindow { Owner = this };

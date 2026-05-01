@@ -54,6 +54,29 @@ public class DroverTerminal : UserControl
         DependencyProperty.Register(nameof(StartupCommandLine), typeof(string), typeof(DroverTerminal),
             new PropertyMetadata("powershell.exe"));
 
+    /// <summary>Optional working directory passed to CreateProcess. Used by ClaudeDirect
+    /// projects since they bypass the pwsh wrapper that would otherwise <c>cd</c> in-shell.</summary>
+    public string? StartupWorkingDirectory
+    {
+        get => (string?)GetValue(StartupWorkingDirectoryProperty);
+        set => SetValue(StartupWorkingDirectoryProperty, value);
+    }
+    public static readonly DependencyProperty StartupWorkingDirectoryProperty =
+        DependencyProperty.Register(nameof(StartupWorkingDirectory), typeof(string), typeof(DroverTerminal),
+            new PropertyMetadata(null));
+
+    /// <summary>Optional environment overrides layered on top of the parent process env, passed
+    /// to CreateProcess as a Unicode environment block. Used by ClaudeDirect to set
+    /// DROVER_SESSION_ID / DROVER_HOOKS_URL / per-project vars without a shell.</summary>
+    public System.Collections.Generic.IReadOnlyDictionary<string, string>? StartupEnvironment
+    {
+        get => (System.Collections.Generic.IReadOnlyDictionary<string, string>?)GetValue(StartupEnvironmentProperty);
+        set => SetValue(StartupEnvironmentProperty, value);
+    }
+    public static readonly DependencyProperty StartupEnvironmentProperty =
+        DependencyProperty.Register(nameof(StartupEnvironment), typeof(System.Collections.Generic.IReadOnlyDictionary<string, string>),
+            typeof(DroverTerminal), new PropertyMetadata(null));
+
     public TerminalTheme? Theme
     {
         get => (TerminalTheme?)GetValue(ThemeProperty);
@@ -94,7 +117,7 @@ public class DroverTerminal : UserControl
 
     private void OnTerminalLoaded(object sender, RoutedEventArgs e)
     {
-        // Loaded fires again on reparent (PoppedOutWindow / DetachReattachProbe).
+        // Loaded fires again on reparent (e.g. PoppedOutWindow tear-off).
         // Don't re-create the PTY — keep the existing session alive.
         if (Connection is not null) return;
 
@@ -106,11 +129,13 @@ public class DroverTerminal : UserControl
         pty.Ready += OnPtyReady;
 
         var cmd = StartupCommandLine;
+        var cwd = StartupWorkingDirectory;
+        var env = StartupEnvironment;
         var cols = Terminal.Columns;
         var rows = Terminal.Rows;
         Task.Run(() =>
         {
-            try { pty.Start(cmd, cols, rows); }
+            try { pty.Start(cmd, cols, rows, cwd, env); }
             catch
             {
                 // PTY init failed — leave the tab blank rather than crashing

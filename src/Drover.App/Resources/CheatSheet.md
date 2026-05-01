@@ -34,6 +34,13 @@ Quick reference for everyday use. Press `Esc` to close · type in the search box
 - `Ctrl+,` — settings
 - `Ctrl+Shift+\`` — bring Drover to the foreground (global)
 - `F1` — this cheat sheet
+- Drag a tab header sideways to reorder; drag it down out of the strip to tear off into a popped-out window.
+
+## Command palette (Ctrl+Shift+P)
+
+- Type any text to filter actions (open project, switch tab, install hook, etc.)
+- `> message` — send `message` to a single tab; pick the target from the result list.
+- `>> message` — broadcast `message` to **every** open tab in one shot. Useful for `/clear`, `/compact`, or sending the same prompt to a fan-out of worktree tabs.
 
 ---
 

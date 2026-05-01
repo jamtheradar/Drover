@@ -236,7 +236,6 @@ public partial class ShellWindow : Window
         Bind(sc.FindInTab, FindInCurrentTab);
         Bind(sc.GlobalFind, OpenGlobalFind);
         Bind(sc.Settings, ShowSettings);
-        Bind(sc.DetachProbe, RunDetachProbe);
         Bind(sc.TogglePlanPanel, TogglePlanPanelHalfWidth);
         Bind(sc.ToggleTaskPanel, ToggleTaskPanelHalfWidth);
         Bind(sc.ToggleFileExplorerPanel, ToggleFileExplorerPanelDefaultWidth);
@@ -457,6 +456,24 @@ public partial class ShellWindow : Window
         }
     }
 
+    /// <summary>
+    /// Click handler for the permission-prompt strip on the tab header. Selects
+    /// the matching tab and brings the window forward so the user can respond
+    /// without first hunting through the strip — works whether the click came
+    /// from the foreground or after the user clicked back from another window.
+    /// </summary>
+    private void PermissionStrip_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (sender is not FrameworkElement fe || fe.Tag is not TerminalTabViewModel tab) return;
+        if (DataContext is ShellViewModel vm)
+        {
+            vm.SelectedTab = tab;
+            BringSelfForward();
+            e.Handled = true;
+        }
+    }
+
     private void OnToastTabClicked(object? sender, int tabIndex)
     {
         Dispatcher.Invoke(() =>
@@ -473,10 +490,45 @@ public partial class ShellWindow : Window
             foreach (TerminalTabViewModel t in e.OldItems) Unsubscribe(t);
         if (e.NewItems is not null)
             foreach (TerminalTabViewModel t in e.NewItems) Subscribe(t);
+        RefreshTitle();
     }
 
-    private void Subscribe(TerminalTabViewModel tab) => tab.AttentionChanged += OnTabAttention;
-    private void Unsubscribe(TerminalTabViewModel tab) => tab.AttentionChanged -= OnTabAttention;
+    private void Subscribe(TerminalTabViewModel tab)
+    {
+        tab.AttentionChanged += OnTabAttention;
+        tab.PermissionPrompted += OnTabPermissionPrompt;
+    }
+    private void Unsubscribe(TerminalTabViewModel tab)
+    {
+        tab.AttentionChanged -= OnTabAttention;
+        tab.PermissionPrompted -= OnTabPermissionPrompt;
+    }
+
+    /// <summary>
+    /// Surfaces a Notification (permission prompt) hook to the user. Always
+    /// flashes the taskbar; raises a toast only when the prompt isn't already
+    /// foreground-visible (window inactive or the tab isn't selected) so a
+    /// foreground user isn't bombarded by toasts they can already see.
+    /// </summary>
+    private void OnTabPermissionPrompt(object? sender, string message)
+    {
+        if (sender is not TerminalTabViewModel tab) return;
+        if (DataContext is not ShellViewModel vm) return;
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            var isForegroundTab = IsActive &&
+                (ReferenceEquals(vm.SelectedTab, tab) || ReferenceEquals(vm.SecondaryTab, tab));
+            if (isForegroundTab) return;
+
+            TaskbarFlash.Flash(this);
+            if (_toast is not null)
+            {
+                var idx = vm.Tabs.IndexOf(tab);
+                if (idx >= 0) _toast.NotifyPermissionPrompt(tab, idx, message);
+            }
+        }));
+    }
 
     private void OnTabAttention(object? sender, (AttentionState previous, AttentionState next) e)
     {
@@ -549,12 +601,6 @@ public partial class ShellWindow : Window
         var idx = vm.SelectedTab is null ? 0 : vm.Tabs.IndexOf(vm.SelectedTab);
         idx = (idx + delta + vm.Tabs.Count) % vm.Tabs.Count;
         vm.SelectedTab = vm.Tabs[idx];
-    }
-
-    private void RunDetachProbe()
-    {
-        if (DataContext is not ShellViewModel vm) return;
-        vm.StatusText = DetachReattachProbe.Run(this, vm);
     }
 
     private void ShowCommandPalette()
@@ -646,11 +692,27 @@ public partial class ShellWindow : Window
             vm.AddProject(dlg.Result);
     }
 
+    private void BulkImport_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        var existing = vm.Projects.ToList();
+        var dlg = new BulkImportDialog(existing) { Owner = this };
+        if (dlg.ShowDialog() != true || dlg.Result.Count == 0) return;
+        foreach (var project in dlg.Result)
+            vm.AddProject(project);
+        vm.StatusText = $"imported {dlg.Result.Count} project{(dlg.Result.Count == 1 ? "" : "s")}";
+    }
+
     private void RemoveProject_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not ShellViewModel vm) return;
         if (sender is not System.Windows.Controls.MenuItem mi) return;
         if (mi.Tag is not Models.ProjectDefinition project) return;
+        var result = MessageBox.Show(this,
+            $"Remove \"{project.Name}\" from the project list?\n\nThis only removes it from Drover — the folder on disk is not deleted.",
+            "Remove project",
+            MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+        if (result != MessageBoxResult.Yes) return;
         vm.RemoveProjectCommand.Execute(project);
     }
 

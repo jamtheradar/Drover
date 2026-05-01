@@ -109,4 +109,24 @@ public sealed class ToastNotifier
         }
         catch { /* no toast capability on this host — ignore */ }
     }
+
+    /// <summary>
+    /// Toast for a Claude permission prompt (Notification hook). Distinct from
+    /// the generic idle toast: shows the prompt text so the user can decide
+    /// without context-switching, and uses a distinct heading so it's visually
+    /// separable in Action Center. Clicking activates the matching tab.
+    /// </summary>
+    public void NotifyPermissionPrompt(TerminalTabViewModel tab, int tabIndex, string message)
+    {
+        try
+        {
+            new ToastContentBuilder()
+                .AddArgument("tabIndex", tabIndex.ToString())
+                .AddText("Claude needs your input")
+                .AddText(tab.Title)
+                .AddText(message)
+                .Show();
+        }
+        catch { /* no toast capability on this host — ignore */ }
+    }
 }

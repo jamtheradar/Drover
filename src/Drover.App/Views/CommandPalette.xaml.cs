@@ -104,11 +104,6 @@ public partial class CommandPalette : Window
             "hooks",
             () => _shell.OpenHooksLog()));
 
-        list.Add(new PaletteAction(
-            "Run detach/reattach probe",
-            "debug",
-            () => _shell.StatusText = DetachReattachProbe.Run(_owner, _shell)));
-
         return list;
     }
 
@@ -173,6 +168,10 @@ public partial class CommandPalette : Window
 
     private void FilterBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        PlaceholderHint.Visibility = string.IsNullOrEmpty(FilterBox.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         if (IsSendMode(out var message, out var broadcast))
         {
             var actions = broadcast ? BuildBroadcastActions(message) : BuildSendActions(message);

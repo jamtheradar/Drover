@@ -225,40 +225,62 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
-                <ItemsControl ItemsSource="{Binding Projects}">
+                <ItemsControl ItemsSource="{Binding ProjectItems}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <Button Command="{Binding DataContext.OpenProjectCommand,
                                               RelativeSource={RelativeSource AncestorType=Window}}"
-                                    CommandParameter="{Binding}"
+                                    CommandParameter="{Binding Project}"
                                     Margin="0,2" Padding="8,5"
                                     HorizontalContentAlignment="Left"
                                     Background="Transparent"
                                     Foreground="#dcdcdc"
                                     BorderThickness="0">
-                                <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="9" Height="9" Margin="0,0,8,0"
-                                             VerticalAlignment="Center"
-                                             Fill="{Binding TabColor, Converter={StaticResource TabColorBrushConv}}" />
-                                    <TextBlock Text="{Binding Name}"
-                                               FontSize="14"
-                                               VerticalAlignment="Center" />
+                                <StackPanel Orientation="Vertical">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="9" Height="9" Margin="0,0,8,0"
+                                                 VerticalAlignment="Center"
+                                                 Fill="{Binding TabColor, Converter={StaticResource TabColorBrushConv}}" />
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="14"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding GitText}"
+                                               FontSize="10"
+                                               Margin="17,1,0,0"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="Git branch · ● dirty · ↑ ahead · ↓ behind">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding GitText}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding GitDirty}" Value="True">
+                                                        <Setter Property="Foreground" Value="#e0c068" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </StackPanel>
                                 <Button.ContextMenu>
                                     <ContextMenu>
                                         <MenuItem Header="Launch with --dangerously-skip-permissions"
                                                   Click="LaunchDangerously_Click"
                                                   ToolTip="Starts a new tab with Claude's permission prompts disabled. Use only on code/projects you trust."
-                                                  Tag="{Binding PlacementTarget.DataContext,
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                         <Separator />
                                         <MenuItem Header="Edit…"
                                                   Click="EditProject_Click"
-                                                  Tag="{Binding PlacementTarget.DataContext,
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                         <MenuItem Header="Remove"
                                                   Click="RemoveProject_Click"
-                                                  Tag="{Binding PlacementTarget.DataContext,
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                     </ContextMenu>
                                 </Button.ContextMenu>
@@ -268,7 +290,15 @@
                 </ItemsControl>
                 <Button Content="+ Add project"
                         Click="AddProject_Click"
-                        Margin="0,8,0,12" Padding="8,4"
+                        Margin="0,8,0,0" Padding="8,4"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
+                <Button Content="+ Import folder of repos…"
+                        Click="BulkImport_Click"
+                        ToolTip="Scan a parent folder for git repositories and import any of them in one shot."
+                        Margin="0,0,0,12" Padding="8,4"
                         HorizontalContentAlignment="Left"
                         Background="Transparent"
                         Foreground="{StaticResource Chrome.TextMuted}"
@@ -349,7 +379,7 @@
                 <TextBlock Text="open a project" FontSize="12"
                            Foreground="{StaticResource Chrome.TextMuted}"
                            HorizontalAlignment="Center" Margin="0,32,0,12" />
-                <ItemsControl ItemsSource="{Binding Projects}" HorizontalAlignment="Center">
+                <ItemsControl ItemsSource="{Binding ProjectItems}" HorizontalAlignment="Center">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center" />
@@ -359,7 +389,7 @@
                         <DataTemplate>
                             <Button Command="{Binding DataContext.OpenProjectCommand,
                                               RelativeSource={RelativeSource AncestorType=Window}}"
-                                    CommandParameter="{Binding}"
+                                    CommandParameter="{Binding Project}"
                                     Margin="8" Padding="20,16"
                                     Background="{StaticResource Chrome.Panel}"
                                     BorderBrush="{StaticResource Chrome.Border}"
@@ -372,6 +402,24 @@
                                                Foreground="{StaticResource Chrome.TextMuted}"
                                                TextTrimming="CharacterEllipsis"
                                                MaxWidth="220" Margin="0,4,0,0" />
+                                    <TextBlock Text="{Binding GitText}" FontSize="10"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="220" Margin="0,4,0,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding GitText}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding GitDirty}" Value="True">
+                                                        <Setter Property="Foreground" Value="#e0c068" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </StackPanel>
                             </Button>
                         </DataTemplate>
@@ -1284,7 +1332,80 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
+                                    <TextBlock Text="{Binding GitText, StringFormat=' · {0}'}"
+                                               FontSize="10"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="Git branch · ● dirty · ↑ ahead · ↓ behind">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding GitText}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding GitDirty}" Value="True">
+                                                        <Setter Property="Foreground" Value="#e0c068" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </StackPanel>
+                                <!-- Live tool-call strip. Populated from PreToolUse/PostToolUse
+                                     hooks ("Reading file…", "Running bash…"); decays after ~3s
+                                     of silence and clears immediately on Stop / SessionStart. -->
+                                <TextBlock Text="{Binding CurrentToolText}"
+                                           Foreground="{StaticResource Chrome.TextMuted}"
+                                           FontSize="10"
+                                           FontStyle="Italic"
+                                           Margin="14,1,0,0"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="220"
+                                           ToolTip="Latest tool call from Claude.">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding CurrentToolText}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <!-- Permission-prompt strip. Visible only when Claude has fired
+                                     a Notification hook (e.g. waiting on tool approval). Click
+                                     selects this tab and brings the window forward — useful
+                                     when the toast has been dismissed but the prompt is still
+                                     pending. -->
+                                <Border MouseLeftButtonDown="PermissionStrip_MouseDown"
+                                        Tag="{Binding}"
+                                        Margin="14,3,0,0"
+                                        Padding="6,2"
+                                        CornerRadius="3"
+                                        Background="#3a2a14"
+                                        BorderBrush="#e0a040"
+                                        BorderThickness="1"
+                                        Cursor="Hand"
+                                        ToolTip="{Binding PermissionPromptText}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding PermissionPromptText}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding PermissionPromptText}"
+                                               Foreground="#ffd890"
+                                               FontSize="10"
+                                               FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="220" />
+                                </Border>
                             </StackPanel>
                             <Button Grid.Column="1"
                                     VerticalAlignment="Center"
@@ -1567,6 +1688,13 @@
                                    Foreground="{StaticResource Chrome.Text}" FontSize="11"
                                    VerticalAlignment="Center" />
                     </Border>
+                    <Border DockPanel.Dock="Left" Padding="14,0,8,0" VerticalAlignment="Stretch"
+                            ToolTip="Drover application version.">
+                        <TextBlock Text="{x:Static svc:AppInfo.DisplayVersion}"
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                    <Border DockPanel.Dock="Left" Width="1" Background="{StaticResource Chrome.Border}" Margin="0,4" />
                     <Border DockPanel.Dock="Left" Padding="14,0" VerticalAlignment="Stretch">
                         <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />

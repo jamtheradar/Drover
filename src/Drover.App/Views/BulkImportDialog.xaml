@@ -1,0 +1,109 @@
+<Window x:Class="Drover.App.Views.BulkImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Import folder of repos"
+        Height="540" Width="640"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        Background="{StaticResource Chrome.Panel}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="4"
+                   Text="Scan a parent folder for git repositories. Drover lists every folder containing a .git entry; tick the ones to import."
+                   Foreground="{StaticResource Chrome.TextMuted}"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,12" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Parent" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,8" />
+        <TextBox   Grid.Row="1" Grid.Column="1" x:Name="PathBox" Margin="0,0,8,8" Padding="4" />
+        <Button    Grid.Row="1" Grid.Column="2" Content="Browse…" Margin="0,0,8,8" Padding="10,4" Click="Browse_Click" />
+        <Button    Grid.Row="1" Grid.Column="3" Content="Scan"    Margin="0,0,0,8" Padding="10,4" Click="Scan_Click" IsDefault="True" />
+
+        <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,0,0,8">
+            <CheckBox x:Name="RecursiveBox"
+                      Content="Scan up to 3 levels deep"
+                      Foreground="{StaticResource Chrome.Text}"
+                      VerticalAlignment="Center"
+                      ToolTip="When off, only the immediate children are scanned (one level)." />
+            <TextBlock Text="·" Foreground="{StaticResource Chrome.TextMuted}" Margin="10,0,10,0" VerticalAlignment="Center" />
+            <TextBlock x:Name="StatusText"
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Border Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="1"
+                Background="{StaticResource Surface.Input}">
+            <ListBox x:Name="ResultsList"
+                     BorderThickness="0"
+                     Background="Transparent"
+                     Foreground="{StaticResource Chrome.Text}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="8,4" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Focusable" Value="False" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Grid.Column="0"
+                                      IsChecked="{Binding Selected, Mode=TwoWay}"
+                                      IsEnabled="{Binding CanSelect}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,8,0" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Name}" Foreground="{StaticResource Chrome.Text}" />
+                                <TextBlock Text="{Binding Path}" Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding HintText}"
+                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                       FontSize="11"
+                                       VerticalAlignment="Center"
+                                       Margin="8,0,0,0" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+
+        <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,8,0,0">
+            <Button Content="Select all"   Padding="10,4" Margin="0,0,8,0" Click="SelectAll_Click" />
+            <Button Content="Select none"  Padding="10,4" Click="SelectNone_Click" />
+            <TextBlock x:Name="KindHint"
+                       Text="Imported as Claude projects with default settings."
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       VerticalAlignment="Center"
+                       Margin="16,0,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" Padding="12,4" Margin="0,0,8,0" IsCancel="True" />
+            <Button x:Name="ImportButton" Content="Import" Padding="12,4" Click="Import_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

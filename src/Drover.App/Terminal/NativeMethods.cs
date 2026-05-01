@@ -6,6 +6,7 @@ namespace Drover.App.Terminal;
 internal static class NativeMethods
 {
     public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+    public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
 
     // PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = ProcThreadAttributeValue(22, FALSE, TRUE, FALSE)
     //   = 22 | PROC_THREAD_ATTRIBUTE_INPUT(0x20000) = 0x00020016

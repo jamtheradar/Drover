@@ -14,9 +14,15 @@ public partial class AddProjectDialog : Window
 {
     public ProjectDefinition? Result { get; private set; }
 
+    private static readonly string[] ModelSuggestions =
+    {
+        "", "sonnet", "opus", "haiku", "sonnet-4-6", "opus-4-7"
+    };
+
     public AddProjectDialog(ProjectDefinition? seed = null)
     {
         InitializeComponent();
+        ModelBox.ItemsSource = ModelSuggestions;
         if (seed is not null)
         {
             Title = "Edit project";
@@ -24,10 +30,13 @@ public partial class AddProjectDialog : Window
             NameBox.Text = seed.Name;
             PathBox.Text = seed.Path;
             if (seed.Kind == ProjectKind.Pwsh) KindPwsh.IsChecked = true;
+            else if (seed.Kind == ProjectKind.ClaudeDirect) KindClaudeDirect.IsChecked = true;
             CommandBox.Text = seed.Command ?? string.Empty;
             ArgsBox.Text = seed.Args ?? string.Empty;
             PlansFolderBox.Text = seed.PlansFolder ?? string.Empty;
             TabColorBox.Text = seed.TabColor ?? string.Empty;
+            LaunchCommandBox.Text = seed.LaunchCommand ?? string.Empty;
+            ModelBox.Text = seed.Model ?? string.Empty;
             if (seed.EnvVars is { Count: > 0 })
                 EnvBox.Text = string.Join(Environment.NewLine, seed.EnvVars.Select(kv => $"{kv.Key}={kv.Value}"));
         }
@@ -87,14 +96,18 @@ public partial class AddProjectDialog : Window
         var path = PathBox.Text.Trim();
         if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(path)) return;
 
-        var kind = KindPwsh.IsChecked == true ? ProjectKind.Pwsh : ProjectKind.Claude;
+        var kind = KindPwsh.IsChecked == true ? ProjectKind.Pwsh
+                 : KindClaudeDirect.IsChecked == true ? ProjectKind.ClaudeDirect
+                 : ProjectKind.Claude;
         var command = string.IsNullOrWhiteSpace(CommandBox.Text) ? null : CommandBox.Text.Trim();
         var args = string.IsNullOrWhiteSpace(ArgsBox.Text) ? null : ArgsBox.Text.Trim();
         var env = ParseEnv(EnvBox.Text);
         var plansFolder = string.IsNullOrWhiteSpace(PlansFolderBox.Text) ? null : PlansFolderBox.Text.Trim();
         var tabColor = string.IsNullOrWhiteSpace(TabColorBox.Text) ? null : TabColorBox.Text.Trim();
+        var launchCommand = string.IsNullOrWhiteSpace(LaunchCommandBox.Text) ? null : LaunchCommandBox.Text.Trim();
+        var model = string.IsNullOrWhiteSpace(ModelBox.Text) ? null : ModelBox.Text.Trim();
 
-        Result = new ProjectDefinition(name, path, kind, command, args, env, plansFolder, tabColor);
+        Result = new ProjectDefinition(name, path, kind, command, args, env, plansFolder, tabColor, launchCommand, model);
         DialogResult = true;
     }
 

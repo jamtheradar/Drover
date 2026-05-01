@@ -18,6 +18,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly ActivityLog _activity;
     private readonly HooksGateway _hooks;
     private readonly HooksInstaller _hooksInstaller;
+    private readonly GitStatusService _gitStatus;
     private readonly System.Windows.Threading.DispatcherTimer _hooksRecheckTimer;
 
     [ObservableProperty] private TerminalTabViewModel? _selectedTab;
@@ -214,13 +215,25 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
-    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller)
+    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller, GitStatusService gitStatus)
     {
         _catalog = catalog;
         _settings = settings;
         _activity = activity;
         _hooks = hooks;
         _hooksInstaller = hooksInstaller;
+        _gitStatus = gitStatus;
+
+        // Project list mirror — wraps the persisted ProjectDefinition records with
+        // the reactive git-status chip the sidebar/welcome views render. Kept in
+        // lock-step with _catalog.Projects via CollectionChanged below.
+        foreach (var p in _catalog.Projects)
+        {
+            ProjectItems.Add(new ProjectListItem(p));
+            _gitStatus.Watch(p.Path);
+        }
+        _catalog.Projects.CollectionChanged += OnCatalogChanged;
+        _gitStatus.StatusChanged += OnGitStatusChanged;
 
         // Periodic recheck so the hook-status badge picks up out-of-band edits to
         // settings.json files (user manually removed hooks, edited settings.local.json,
@@ -567,7 +580,74 @@ public sealed partial class ShellViewModel : ObservableObject
     public RelayCommand CloseSecondaryCommand { get; }
 
     public ObservableCollection<ProjectDefinition> Projects => _catalog.Projects;
+    public ObservableCollection<ProjectListItem> ProjectItems { get; } = new();
     public ObservableCollection<TerminalTabViewModel> Tabs { get; } = new();
+
+    private void OnCatalogChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (ProjectDefinition old in e.OldItems)
+            {
+                _gitStatus.Unwatch(old.Path);
+                for (int i = ProjectItems.Count - 1; i >= 0; i--)
+                {
+                    if (ReferenceEquals(ProjectItems[i].Project, old)) { ProjectItems.RemoveAt(i); break; }
+                }
+            }
+        }
+        if (e.NewItems is not null)
+        {
+            // Use the catalog's index so ProjectItems mirrors order. Falls back to Add
+            // when the catalog event reports an unknown action (Reset/Move).
+            foreach (ProjectDefinition added in e.NewItems)
+            {
+                var idx = _catalog.Projects.IndexOf(added);
+                var item = new ProjectListItem(added);
+                if (idx >= 0 && idx <= ProjectItems.Count) ProjectItems.Insert(idx, item);
+                else ProjectItems.Add(item);
+                _gitStatus.Watch(added.Path);
+            }
+        }
+        if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Replace
+            && e.OldItems is { Count: > 0 } && e.NewItems is { Count: > 0 })
+        {
+            // Catch-all: if the catalog Replace fired both old/new, the loops above will
+            // have removed-then-added — fine, but make sure we re-watch the new path even
+            // if it equals the old (pure metadata edit). _gitStatus.Watch is idempotent.
+            foreach (ProjectDefinition added in e.NewItems) _gitStatus.Watch(added.Path);
+        }
+    }
+
+    private void OnGitStatusChanged(object? sender, (string Path, GitStatus Status) e)
+    {
+        var text = e.Status.ChipText;
+        foreach (var item in ProjectItems)
+        {
+            if (string.Equals(item.Project.Path, e.Path, System.StringComparison.OrdinalIgnoreCase))
+            {
+                item.GitText = text;
+                item.GitDirty = e.Status.Dirty;
+                item.GitHasRepo = e.Status.IsRepo;
+            }
+        }
+        foreach (var t in Tabs)
+        {
+            if (string.Equals(t.Project.Path, e.Path, System.StringComparison.OrdinalIgnoreCase))
+            {
+                t.GitText = text;
+                t.GitDirty = e.Status.Dirty;
+                t.GitHasRepo = e.Status.IsRepo;
+            }
+        }
+        if (SecondaryTab is { } sec
+            && string.Equals(sec.Project.Path, e.Path, System.StringComparison.OrdinalIgnoreCase))
+        {
+            sec.GitText = text;
+            sec.GitDirty = e.Status.Dirty;
+            sec.GitHasRepo = e.Status.IsRepo;
+        }
+    }
 
     public RelayCommand<ProjectDefinition> OpenProjectCommand { get; }
     public RelayCommand<TerminalTabViewModel> CloseTabCommand { get; }
@@ -622,16 +702,25 @@ public sealed partial class ShellViewModel : ObservableObject
             if (ReferenceEquals(t.Project, project) || t.Project.Name == project.Name) existing++;
         var title = existing == 0 ? project.Name : $"{project.Name} #{existing + 1}";
         if (dangerouslySkipPermissions) title += " ⚠";
+        var s = _settings.Current;
         var tab = new TerminalTabViewModel(
             project, title,
-            _settings.Current.FontFamily, _settings.Current.FontSize,
+            s.FontFamily, s.FontSize,
             resume: false,
             hooksUrl: _hooks.Url,
-            dangerouslySkipPermissions: dangerouslySkipPermissions);
+            dangerouslySkipPermissions: dangerouslySkipPermissions,
+            claudeExecutablePath: s.ClaudeExecutablePath,
+            defaultClaudeModel: s.DefaultClaudeModel,
+            globalEnvVars: s.GlobalEnvVars,
+            logOptions: new SessionLogOptions(s.LogKeepCount, s.LogByteBudgetMb));
         _hooks.Register(tab.SessionId, tab.OnHookEvent);
         _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
         tab.StatusLineUpdated += OnTabStatusLineUpdated;
         tab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
+        var cached = _gitStatus.Get(project.Path);
+        tab.GitText = cached.ChipText;
+        tab.GitDirty = cached.Dirty;
+        tab.GitHasRepo = cached.IsRepo;
         Tabs.Add(tab);
         SelectedTab = tab;
         DashboardActive = false;
@@ -664,15 +753,24 @@ public sealed partial class ShellViewModel : ObservableObject
         if (project is null) return;
         CloseSecondary();
         var title = $"{project.Name} ▶";
+        var s2 = _settings.Current;
         SecondaryTab = new TerminalTabViewModel(
             project, title,
-            _settings.Current.FontFamily, _settings.Current.FontSize,
+            s2.FontFamily, s2.FontSize,
             resume: false,
-            hooksUrl: _hooks.Url);
+            hooksUrl: _hooks.Url,
+            claudeExecutablePath: s2.ClaudeExecutablePath,
+            defaultClaudeModel: s2.DefaultClaudeModel,
+            globalEnvVars: s2.GlobalEnvVars,
+            logOptions: new SessionLogOptions(s2.LogKeepCount, s2.LogByteBudgetMb));
         _hooks.Register(SecondaryTab.SessionId, SecondaryTab.OnHookEvent);
         _hooks.RegisterStatus(SecondaryTab.SessionId, SecondaryTab.OnStatusLine);
         SecondaryTab.StatusLineUpdated += OnTabStatusLineUpdated;
         SecondaryTab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
+        var cachedSec = _gitStatus.Get(project.Path);
+        SecondaryTab.GitText = cachedSec.ChipText;
+        SecondaryTab.GitDirty = cachedSec.Dirty;
+        SecondaryTab.GitHasRepo = cachedSec.IsRepo;
     }
 
     private void CloseSecondary()

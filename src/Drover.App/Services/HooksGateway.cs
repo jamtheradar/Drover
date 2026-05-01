@@ -123,16 +123,34 @@ public sealed class HooksGateway : IDisposable
             {
                 using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
                 var root = doc.RootElement;
+                // Claude Code's hook envelope keys the event name as
+                // `hook_event_name` and the tool as `tool_name`. Older shape
+                // (`type`/`tool`) is kept as a fallback so anything posting in
+                // either form still routes — see hooks.jsonl samples.
+                string ReadStr(params string[] names)
+                {
+                    foreach (var n in names)
+                    {
+                        if (root.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String)
+                            return v.GetString() ?? "";
+                    }
+                    return "";
+                }
+                var typeName = ReadStr("hook_event_name", "type");
+                var toolName = ReadStr("tool_name", "tool");
+                var phaseName = ReadStr("phase");
+                var message = ReadStr("message");
                 evt = new HookEvent(
                     sessionId,
-                    root.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "",
-                    root.TryGetProperty("tool", out var tn) ? tn.GetString() : null,
-                    root.TryGetProperty("phase", out var ph) ? ph.GetString() : null,
+                    typeName,
+                    string.IsNullOrEmpty(toolName) ? null : toolName,
+                    string.IsNullOrEmpty(phaseName) ? null : phaseName,
+                    string.IsNullOrEmpty(message) ? null : message,
                     body);
             }
             catch
             {
-                evt = new HookEvent(sessionId, "raw", null, null, body);
+                evt = new HookEvent(sessionId, "raw", null, null, null, body);
             }
 
             AppendLog(evt, ctx.Request.RemoteEndPoint?.ToString());
@@ -231,4 +249,4 @@ public sealed class HooksGateway : IDisposable
     }
 }
 
-public sealed record HookEvent(string SessionId, string Type, string? Tool, string? Phase, string RawBody);
+public sealed record HookEvent(string SessionId, string Type, string? Tool, string? Phase, string? Message, string RawBody);
