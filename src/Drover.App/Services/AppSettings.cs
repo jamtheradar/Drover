@@ -56,9 +56,31 @@ public sealed record AppSettings(
     // is exceeded. 0 = no count cap; 0 MB = no byte cap.
     int LogKeepCount = 50,
     int LogByteBudgetMb = 500,
+    // What gets written per tab. Transcript = clean .transcript.md only (default —
+    // human-readable, hook-driven, no ANSI). Full = also tee the raw VT stream into a
+    // .log for replay/scrollback debugging. Off = neither.
+    SessionLogLevel SessionLogLevel = SessionLogLevel.Transcript,
     // When true, registers a HKCU\...\Run entry pointing at this exe so Drover
     // launches at sign-in. The toggle writes the registry on Save.
-    bool StartWithWindows = false);
+    bool StartWithWindows = false,
+    // Last kanban source the user picked: "Local" | "Live" | "Agents". Defaults
+    // to Local; introduced in v0.5 with the kanban board.
+    string? KanbanLastSource = null,
+    string? KanbanLastAgentDispatchedTo = null,
+    Dictionary<string, double>? KanbanColumnWidths = null,
+    // Legacy: was the skills.sh API token. The skills.sh integration was
+    // removed; field is kept so existing settings.json files still deserialize
+    // cleanly. Unused.
+    string SkillsApiToken = "",
+    // GitHub repos to scan for community skills (folders containing SKILL.md).
+    // null → use the built-in defaults (see SkillsRepoCatalog.DefaultSources);
+    // an empty list → user has explicitly cleared all sources, show no
+    // community catalog. Each entry is `owner/repo` or `owner/repo@branch`.
+    List<string>? SkillsSources = null,
+    // Base font size (in points) for non-terminal panels — Specs, Plan, Tasks,
+    // File explorer, Kanban, Vault, and the dashboard. Applied as a layout-time
+    // ScaleTransform so chrome scales with the text. 12 = 1.0× (default).
+    int PanelFontSize = 12);
 
 public sealed record KeyboardShortcuts(
     string CommandPalette = "Ctrl+Shift+P",
@@ -70,4 +92,5 @@ public sealed record KeyboardShortcuts(
     string Settings = "Ctrl+OemComma",
     string TogglePlanPanel = "Alt+P",
     string ToggleTaskPanel = "Ctrl+Shift+T",
-    string ToggleFileExplorerPanel = "Alt+E");
+    string ToggleFileExplorerPanel = "Alt+E",
+    string ToggleKanbanPanel = "Alt+K");

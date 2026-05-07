@@ -8,7 +8,7 @@ public static class TaskReader
 {
     private static readonly Regex HeadingRx = new(@"^(#{2,3})\s+(.+?)\s*$", RegexOptions.Compiled);
     private static readonly Regex IgnoredHeadingRx = new(@"^(#{1}|#{4,})\s+.+?\s*$", RegexOptions.Compiled);
-    private static readonly Regex ItemRx = new(@"^(\s*)([-*])\s+\[([ xX])\]\s+(.+?)\s*$", RegexOptions.Compiled);
+    private static readonly Regex ItemRx = new(@"^(\s*)([-*])\s+\[([ xX/~])\]\s+(.+?)\s*$", RegexOptions.Compiled);
     private static readonly Regex FenceRx = new(@"^\s*```", RegexOptions.Compiled);
     private static readonly Regex WhitespaceRx = new(@"\s+", RegexOptions.Compiled);
 
@@ -144,9 +144,12 @@ public static class TaskReader
             {
                 var indentRaw = itemMatch.Groups[1].Value;
                 int indentLevel = ComputeIndent(indentRaw);
-                bool isDone = itemMatch.Groups[3].Value.Equals("x", System.StringComparison.OrdinalIgnoreCase);
+                var marker = itemMatch.Groups[3].Value;
+                bool isDone = marker.Equals("x", System.StringComparison.OrdinalIgnoreCase);
+                bool isInProgress = marker == "/";
+                bool isPlanned = marker == "~";
                 var text = itemMatch.Groups[4].Value;
-                var item = new TaskItem(lineNum, text, isDone, indentLevel);
+                var item = new TaskItem(lineNum, text, isDone, indentLevel, isInProgress, line, isPlanned);
 
                 if (curHeadingLine is null) orphans.Add(item);
                 else { curItems.Add(item); sawFirstItemInSection = true; }

@@ -1,0 +1,172 @@
+<Window x:Class="Drover.App.Views.SpecDetailDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="clr-namespace:Drover.App.Models"
+        xmlns:views="clr-namespace:Drover.App.Views"
+        Title="Spec details" Height="780" Width="820"
+        MinHeight="480" MinWidth="540"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False"
+        Background="{StaticResource Chrome.Panel}"
+        Foreground="{StaticResource Chrome.Text}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   x:Name="HeaderText"
+                   Foreground="{StaticResource Chrome.TextMuted}"
+                   FontSize="11"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,12" />
+
+        <TextBlock Grid.Row="1"
+                   Text="Title"
+                   Foreground="{StaticResource Chrome.TextMuted}"
+                   FontSize="11"
+                   Margin="0,0,0,4" />
+        <TextBox Grid.Row="2"
+                 x:Name="TitleBox"
+                 Padding="6,4"
+                 TextWrapping="Wrap"
+                 AcceptsReturn="False"
+                 MinHeight="32"
+                 MaxHeight="160"
+                 VerticalScrollBarVisibility="Auto"
+                 Margin="0,0,0,12"
+                 VerticalContentAlignment="Top"
+                 Background="{StaticResource Surface.Input}"
+                 Foreground="{StaticResource Chrome.Text}"
+                 BorderBrush="{StaticResource Surface.InputBorder}"
+                 CaretBrush="{StaticResource Chrome.Text}"
+                 SelectionBrush="{StaticResource Chrome.Accent}" />
+
+        <Grid Grid.Row="3" Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Status"
+                       Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" />
+            <TextBlock Grid.Column="2"
+                       x:Name="SeverityLabel"
+                       Text="Block severity"
+                       Foreground="{StaticResource Chrome.TextMuted}" FontSize="11" />
+        </Grid>
+        <Grid Grid.Row="4" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <ComboBox Grid.Column="0"
+                      x:Name="StatusBox"
+                      SelectedValuePath="Tag"
+                      SelectionChanged="StatusBox_SelectionChanged"
+                      Background="{StaticResource Surface.Input}"
+                      Foreground="{StaticResource Chrome.Text}"
+                      BorderBrush="{StaticResource Surface.InputBorder}">
+                <ComboBoxItem Content="pending"     Tag="{x:Static m:SpecStatus.Pending}"    Foreground="{StaticResource Chrome.Text}" />
+                <ComboBoxItem Content="in-progress" Tag="{x:Static m:SpecStatus.InProgress}" Foreground="{StaticResource Chrome.Text}" />
+                <ComboBoxItem Content="done"        Tag="{x:Static m:SpecStatus.Done}"       Foreground="{StaticResource Chrome.Text}" />
+                <ComboBoxItem Content="blocked"     Tag="{x:Static m:SpecStatus.Blocked}"    Foreground="{StaticResource Chrome.Text}" />
+            </ComboBox>
+            <ComboBox Grid.Column="2"
+                      x:Name="SeverityBox"
+                      SelectedValuePath="Tag"
+                      Background="{StaticResource Surface.Input}"
+                      Foreground="{StaticResource Chrome.Text}"
+                      BorderBrush="{StaticResource Surface.InputBorder}">
+                <ComboBoxItem Content="(unset — stops loop)" Tag="{x:Static m:BlockSeverity.None}"    Foreground="{StaticResource Chrome.Text}" />
+                <ComboBoxItem Content="trivial"              Tag="{x:Static m:BlockSeverity.Trivial}" Foreground="{StaticResource Chrome.Text}" />
+                <ComboBoxItem Content="major"                Tag="{x:Static m:BlockSeverity.Major}"   Foreground="{StaticResource Chrome.Text}" />
+            </ComboBox>
+        </Grid>
+
+        <DockPanel Grid.Row="5" Margin="0,0,0,4" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button x:Name="FontDownButton"
+                        Click="FontDown_Click"
+                        ToolTip="Decrease body font"
+                        Content="A−"
+                        FontSize="11"
+                        Padding="6,2"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Cursor="Hand"
+                        Foreground="{StaticResource Chrome.Text}" />
+                <Button x:Name="FontResetButton"
+                        Click="FontReset_Click"
+                        ToolTip="Reset body font"
+                        Content="1×"
+                        FontSize="11"
+                        Padding="6,2"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Cursor="Hand"
+                        Foreground="{StaticResource Chrome.Text}" />
+                <Button x:Name="FontUpButton"
+                        Click="FontUp_Click"
+                        ToolTip="Increase body font"
+                        Content="A+"
+                        FontSize="13"
+                        Padding="6,2"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Cursor="Hand"
+                        Foreground="{StaticResource Chrome.Text}" />
+            </StackPanel>
+            <TextBlock Text="Body (markdown)"
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       FontSize="11"
+                       VerticalAlignment="Center" />
+        </DockPanel>
+        <Border Grid.Row="6"
+                Margin="0,0,0,12"
+                BorderBrush="{StaticResource Surface.InputBorder}"
+                BorderThickness="1"
+                CornerRadius="3"
+                Background="{StaticResource Surface.Input}">
+            <Border.LayoutTransform>
+                <ScaleTransform x:Name="BodyScale" ScaleX="1" ScaleY="1" />
+            </Border.LayoutTransform>
+            <views:MarkdownEditor x:Name="BodyEditor" />
+        </Border>
+
+        <TextBlock Grid.Row="7"
+                   x:Name="ErrorText"
+                   Foreground="{StaticResource Kanban.GateBlocked}"
+                   FontSize="11"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed"
+                   Margin="0,0,0,8" />
+
+        <DockPanel Grid.Row="8" Margin="0,4,0,0">
+            <Button DockPanel.Dock="Left"
+                    Content="Open file…"
+                    Padding="10,4"
+                    Click="Open_Click"
+                    Foreground="{StaticResource Chrome.Text}"
+                    ToolTip="Open the spec in your default editor" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Cancel" Padding="12,4" Margin="0,0,8,0" IsCancel="True"
+                        Foreground="{StaticResource Chrome.Text}" />
+                <Button Content="Save"   Padding="12,4" IsDefault="True" Click="Save_Click"
+                        Foreground="{StaticResource Chrome.Text}" />
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

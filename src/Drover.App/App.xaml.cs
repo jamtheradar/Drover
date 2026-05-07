@@ -44,6 +44,9 @@ public partial class App : Application
         _host = Host.CreateDefaultBuilder()
             .ConfigureServices(services =>
             {
+                services.AddSingleton<SkillsRepoCatalog>();
+                services.AddSingleton<VaultStore>();
+                services.AddSingleton<VaultMcpInstaller>();
                 services.AddSingleton<ProjectsCatalog>();
                 services.AddSingleton<SessionStore>();
                 services.AddSingleton<SettingsStore>();
@@ -54,8 +57,20 @@ public partial class App : Application
                 services.AddSingleton<HooksInstaller>();
                 services.AddSingleton<TokenStats>();
                 services.AddSingleton<GitStatusService>();
+                services.AddSingleton<LiveTodoStore>();
+                services.AddSingleton<AgentCatalog>();
+                services.AddSingleton<BuildStatusTracker>();
+                services.AddSingleton<GateRegistry>();
                 services.AddSingleton<TrayIconService>();
                 services.AddSingleton<UpdateService>();
+                services.AddSingleton<TemplateService>();
+                services.AddSingleton<ITemplateService>(sp => sp.GetRequiredService<TemplateService>());
+                services.AddSingleton<PromptLibrary>();
+                services.AddSingleton<IPromptLibrary>(sp => sp.GetRequiredService<PromptLibrary>());
+                services.AddSingleton<LoopConfigService>();
+                services.AddSingleton<ILoopConfigService>(sp => sp.GetRequiredService<LoopConfigService>());
+                services.AddSingleton<SpecsPanelViewModel>();
+                services.AddSingleton<VaultViewModel>();
                 services.AddSingleton<ShellViewModel>();
                 services.AddSingleton<ShellWindow>();
             })
@@ -88,28 +103,21 @@ public partial class App : Application
         // are off; gating start on HooksEnabled stranded that path.
         gateway.TryStart();
 
-        // Reconcile settings.json on every launch — covers fresh installs (writes
-        // entries) and the user disabling hooks externally then relaunching (strips
-        // entries). Safe to run regardless of gateway state: when hooks are disabled
-        // this just removes any prior Drover entries.
-        installer.TryInstall(
-            settingsStore.Current.TakeOverStatusLine,
-            settingsStore.Current.HooksEnabled,
-            settingsStore.Current.IdleHookEnabled);
+        // Drover's hook config is project-scoped — written to each project's
+        // .claude/settings.local.json from the project context menu. Older
+        // versions wrote to the global ~/.claude/settings.json; clean those up
+        // on launch so a session-wide Drover install doesn't double-route or
+        // leak across projects we've never opened. User-added entries are left
+        // alone.
+        installer.TryUninstallGlobal();
 
-        var lastSnapshot = (
-            settingsStore.Current.TakeOverStatusLine,
-            settingsStore.Current.HooksEnabled,
-            settingsStore.Current.IdleHookEnabled);
         settingsStore.Changed += (_, _) =>
         {
-            var s = settingsStore.Current;
-            gateway.DebugLogging = s.HooksDebugLogging;
-
-            var snapshot = (s.TakeOverStatusLine, s.HooksEnabled, s.IdleHookEnabled);
-            if (snapshot == lastSnapshot) return;
-            lastSnapshot = snapshot;
-            installer.TryInstall(s.TakeOverStatusLine, s.HooksEnabled, s.IdleHookEnabled);
+            // Hook-config toggles (HooksEnabled / IdleHookEnabled / TakeOverStatusLine)
+            // now apply at install time per project — they take effect when the user
+            // next clicks "Install Drover hook in project". Only the gateway's debug
+            // log flag is reconciled live.
+            gateway.DebugLogging = settingsStore.Current.HooksDebugLogging;
         };
 
         var shell = _host.Services.GetRequiredService<ShellWindow>();

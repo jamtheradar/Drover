@@ -1,0 +1,286 @@
+<UserControl x:Class="Drover.App.Views.SpecsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Drover.App.ViewModels"
+             Background="{StaticResource Chrome.Panel}"
+             Foreground="{StaticResource Chrome.Text}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <CollectionViewSource x:Key="SpecsView" Source="{Binding Specs}">
+            <CollectionViewSource.GroupDescriptions>
+                <PropertyGroupDescription PropertyName="StatusGroup" />
+            </CollectionViewSource.GroupDescriptions>
+        </CollectionViewSource>
+
+        <Style x:Key="HeaderButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{StaticResource Chrome.Border}" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Surface.ControlHover}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Visibility flipped by IsLoopRunning. Use a Style with a DataTrigger
+             so we don't need a custom Inverse converter. -->
+        <Style x:Key="VisibleWhenIdle" TargetType="FrameworkElement">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsLoopRunning}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="VisibleWhenRunning" TargetType="FrameworkElement">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsLoopRunning}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel LastChildFill="True">
+
+        <Border DockPanel.Dock="Top"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,0,1"
+                Padding="10,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center">
+                    <TextBlock Text="Specs"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource Chrome.Text}" />
+                    <TextBlock Text="{Binding ProjectName}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="11" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="RunLoopFaceButton"
+                            Content="{Binding RunLoopButtonLabel}"
+                            Command="{Binding RunLoopDefaultCommand}"
+                            ToolTip="Run loop using the project default mode">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource HeaderButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLoopRunning}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <Button x:Name="ChevronButton"
+                            Content="&#x25BE;"
+                            Margin="2,0,0,0"
+                            ToolTip="Run-loop options"
+                            Click="OnChevronClick">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource HeaderButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLoopRunning}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Run in Drover-driven mode"
+                                          Command="{Binding RunLoopDroverCommand}" />
+                                <MenuItem Header="Run in session-driven mode"
+                                          Command="{Binding RunLoopSessionCommand}" />
+                                <Separator />
+                                <MenuItem Header="Set default to Drover-driven"
+                                          Command="{Binding SetDefaultDroverCommand}" />
+                                <MenuItem Header="Set default to session-driven"
+                                          Command="{Binding SetDefaultSessionCommand}" />
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+
+                    <Button Content="Stop"
+                            Margin="6,0,0,0"
+                            Command="{Binding StopLoopCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource HeaderButton}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLoopRunning}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+                    <Button Style="{StaticResource HeaderButton}"
+                            Content="&#x21BB;"
+                            Margin="6,0,0,0"
+                            ToolTip="Re-scan specs/"
+                            Command="{Binding RefreshCommand}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Progress strip — visible whenever ProgressText is non-empty. -->
+        <Border DockPanel.Dock="Top"
+                Background="{StaticResource Surface.Hover}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,0,1"
+                Padding="10,4">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding ProgressText}" Value="">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <TextBlock Text="{Binding ProgressText}"
+                       Foreground="{StaticResource Chrome.Text}"
+                       FontFamily="Consolas, Cascadia Code, monospace"
+                       FontSize="11" />
+        </Border>
+
+        <!-- Status footer -->
+        <Border DockPanel.Dock="Bottom"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,1,0,0"
+                Padding="10,6">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding StatusText}" Value="">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <TextBlock Text="{Binding StatusText}"
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       TextWrapping="Wrap" />
+        </Border>
+
+        <!-- Specs list, grouped by status. The CheckBox per row is the
+             multi-select; ListBox SelectionMode is Single because clicking a
+             row should focus it without changing selection — selection is
+             explicit via the box, matching the spec ("multi-select on rows"). -->
+        <ListBox ItemsSource="{Binding Source={StaticResource SpecsView}}"
+                 SelectionMode="Single"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 Foreground="{StaticResource Chrome.Text}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.GroupStyle>
+                <GroupStyle>
+                    <GroupStyle.HeaderTemplate>
+                        <DataTemplate>
+                            <Border Background="{StaticResource Surface.Hover}"
+                                    Padding="10,3">
+                                <TextBlock Text="{Binding Name}"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource Chrome.Text}" />
+                            </Border>
+                        </DataTemplate>
+                    </GroupStyle.HeaderTemplate>
+                </GroupStyle>
+            </ListBox.GroupStyle>
+
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <EventSetter Event="MouseDoubleClick" Handler="OnSpecDoubleClick" />
+                </Style>
+            </ListBox.ItemContainerStyle>
+
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="10,3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox Grid.Column="0"
+                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,8,0" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding Id}"
+                                   FontFamily="Consolas, Cascadia Code, monospace"
+                                   Foreground="{StaticResource Chrome.TextMuted}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                        <StackPanel Grid.Column="2" Orientation="Vertical" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Title}"
+                                       Foreground="{StaticResource Chrome.Text}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding FileName}"
+                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                       FontSize="11" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Border Background="{StaticResource Surface.Control}"
+                                    Padding="5,1"
+                                    CornerRadius="2"
+                                    Margin="4,0,0,0">
+                                <TextBlock Text="{Binding StatusBadge}"
+                                           FontSize="11"
+                                           Foreground="{StaticResource Chrome.Text}" />
+                            </Border>
+                            <Border Background="{StaticResource Surface.Control}"
+                                    Padding="5,1"
+                                    CornerRadius="2"
+                                    Margin="4,0,0,0"
+                                    Visibility="{Binding HasSeverity, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding SeverityBadge}"
+                                           FontSize="11"
+                                           Foreground="{StaticResource Chrome.Text}" />
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+    </DockPanel>
+</UserControl>

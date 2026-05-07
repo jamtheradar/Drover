@@ -23,13 +23,17 @@ public sealed class SessionStore
     private readonly ProjectsCatalog _catalog;
     private readonly SettingsStore _settings;
     private readonly HooksGateway _hooks;
+    private readonly LiveTodoStore _liveTodos;
+    private readonly BuildStatusTracker _buildTracker;
     private ShellViewModel? _shell;
 
-    public SessionStore(ProjectsCatalog catalog, SettingsStore settings, HooksGateway hooks)
+    public SessionStore(ProjectsCatalog catalog, SettingsStore settings, HooksGateway hooks, LiveTodoStore liveTodos, BuildStatusTracker buildTracker)
     {
         _catalog = catalog;
         _settings = settings;
         _hooks = hooks;
+        _liveTodos = liveTodos;
+        _buildTracker = buildTracker;
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Drover");
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "session.json");
@@ -85,8 +89,13 @@ public sealed class SessionStore
                     claudeExecutablePath: settings.ClaudeExecutablePath,
                     defaultClaudeModel: settings.DefaultClaudeModel,
                     globalEnvVars: settings.GlobalEnvVars,
-                    logOptions: new SessionLogOptions(settings.LogKeepCount, settings.LogByteBudgetMb));
-                _hooks.Register(tab.SessionId, tab.OnHookEvent);
+                    logOptions: new SessionLogOptions(settings.LogKeepCount, settings.LogByteBudgetMb, settings.SessionLogLevel));
+                _hooks.Register(tab.SessionId, evt =>
+                {
+                    tab.OnHookEvent(evt);
+                    _liveTodos.Ingest(evt);
+                    _buildTracker.Ingest(evt, tab.Project.Path);
+                });
                 _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
                 tab.StatusLineUpdated += _shell.OnTabStatusLineUpdated;
                 _shell.Tabs.Add(tab);

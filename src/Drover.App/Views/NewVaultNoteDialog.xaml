@@ -1,0 +1,36 @@
+<Window x:Class="Drover.App.Views.NewVaultNoteDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="New vault note"
+        Height="190" Width="460"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{StaticResource Chrome.Panel}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="Relative path"
+                   Foreground="{StaticResource Chrome.Text}" Margin="0,0,0,4" />
+        <TextBox   Grid.Row="1" x:Name="PathBox" Padding="6,4"
+                   VerticalContentAlignment="Center" />
+        <TextBlock Grid.Row="2" Margin="0,4,0,0"
+                   Text="Path is rooted at the active vault namespace. .md is appended automatically."
+                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                   TextWrapping="Wrap" />
+        <TextBlock Grid.Row="3" x:Name="ErrorText"
+                   Margin="0,8,0,0"
+                   Foreground="#e57373" FontSize="11"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed" />
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" Padding="12,4" Margin="0,0,8,0" IsCancel="True" />
+            <Button Content="Create" Padding="12,4" IsDefault="True" Click="Create_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

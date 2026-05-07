@@ -19,6 +19,16 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly HooksGateway _hooks;
     private readonly HooksInstaller _hooksInstaller;
     private readonly GitStatusService _gitStatus;
+    private readonly LiveTodoStore _liveTodos;
+    private readonly AgentCatalog _agents;
+    private readonly BuildStatusTracker _buildTracker;
+    private readonly GateRegistry _gates;
+    private readonly ToastNotifier _toaster;
+    private readonly TemplateService _templateService;
+    private readonly PromptLibrary _promptLibrary;
+    private readonly SkillsRepoCatalog _skillsRepoCatalog;
+    private readonly VaultStore _vaultStore;
+    private readonly VaultMcpInstaller _vaultMcpInstaller;
     private readonly System.Windows.Threading.DispatcherTimer _hooksRecheckTimer;
 
     [ObservableProperty] private TerminalTabViewModel? _selectedTab;
@@ -28,6 +38,9 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private bool _planPanelVisible;
     [ObservableProperty] private bool _taskPanelVisible;
     [ObservableProperty] private bool _fileExplorerPanelVisible;
+    [ObservableProperty] private bool _kanbanPanelVisible;
+    [ObservableProperty] private bool _specsPanelVisible;
+    [ObservableProperty] private bool _vaultPanelVisible;
     /// <summary>
     /// Pixel width of the right pane (Activity, Plan, or Tasks, whichever is open).
     /// 0 when collapsed. Bound two-way to the right column so the GridSplitter
@@ -36,7 +49,9 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty] private double _rightPaneWidth;
     private double _lastRightPaneOpenWidth = 380;
-    public bool RightPaneOpen => PlanPanelVisible || ActivityVisible || TaskPanelVisible || FileExplorerPanelVisible;
+    public bool RightPaneOpen => PlanPanelVisible || ActivityVisible || TaskPanelVisible || FileExplorerPanelVisible || KanbanPanelVisible || SpecsPanelVisible || VaultPanelVisible;
+
+    public KanbanViewModel Kanban { get; private set; } = null!;
 
     public ObservableCollection<Drover.App.Models.FileNode> FileExplorerRoots { get; } = new();
     [ObservableProperty] private string _fileExplorerStatusText = string.Empty;
@@ -52,6 +67,12 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <summary>Font multiplier for the plan panel content. 1.0 = default.
     /// Applied as a LayoutTransform so everything (text, padding) scales together.</summary>
     [ObservableProperty] private double _planFontScale = 1.0;
+    /// <summary>Multiplier applied to all non-terminal panels (Specs, Plan,
+    /// Tasks, File explorer, Kanban, Vault, dashboard). Sourced from
+    /// <see cref="AppSettings.PanelFontSize"/> divided by 12 (the design
+    /// baseline). Persisted back to settings whenever the user adjusts it
+    /// from the Settings window.</summary>
+    [ObservableProperty] private double _panelFontScale = 1.0;
     public ObservableCollection<Drover.App.Models.PlanFileEntry> AvailablePlans { get; } = new();
 
     // ─── Task panel state (parallels Plan panel) ────────────────────────────
@@ -64,6 +85,8 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private bool _selectedTaskFileIsDone;
     [ObservableProperty] private bool _canMarkSelectedTaskFileDone;
     [ObservableProperty] private double _taskFontScale = 1.0;
+    [ObservableProperty] private bool _taskComposerVisible;
+    [ObservableProperty] private string _taskComposerText = string.Empty;
     public ObservableCollection<Drover.App.Models.TaskFileEntry> AvailableTaskFiles { get; } = new();
     [ObservableProperty] private bool _dashboardActive;
     [ObservableProperty] private bool _tokenomicsActive;
@@ -113,7 +136,25 @@ public sealed partial class ShellViewModel : ObservableObject
 
     partial void OnActivityVisibleChanged(bool value)
     {
-        if (value) { PlanPanelVisible = false; TaskPanelVisible = false; FileExplorerPanelVisible = false; }
+        if (value) { PlanPanelVisible = false; TaskPanelVisible = false; FileExplorerPanelVisible = false; KanbanPanelVisible = false; SpecsPanelVisible = false; VaultPanelVisible = false; }
+        UpdateRightPaneWidth();
+        OnPropertyChanged(nameof(RightPaneOpen));
+    }
+
+    partial void OnSpecsPanelVisibleChanged(bool value)
+    {
+        if (value)
+        {
+            ActivityVisible = false;
+            PlanPanelVisible = false;
+            TaskPanelVisible = false;
+            FileExplorerPanelVisible = false;
+            KanbanPanelVisible = false;
+            VaultPanelVisible = false;
+            // Bind the panel to the current tab on first show — same pattern
+            // as Kanban.OnTabChanged.
+            Specs.OnTabChanged(SelectedTab);
+        }
         UpdateRightPaneWidth();
         OnPropertyChanged(nameof(RightPaneOpen));
     }
@@ -125,6 +166,9 @@ public sealed partial class ShellViewModel : ObservableObject
             ActivityVisible = false;
             TaskPanelVisible = false;
             FileExplorerPanelVisible = false;
+            KanbanPanelVisible = false;
+            SpecsPanelVisible = false;
+            VaultPanelVisible = false;
             LoadPlanForSelectedTab();
         }
         else
@@ -142,6 +186,9 @@ public sealed partial class ShellViewModel : ObservableObject
             ActivityVisible = false;
             PlanPanelVisible = false;
             FileExplorerPanelVisible = false;
+            KanbanPanelVisible = false;
+            SpecsPanelVisible = false;
+            VaultPanelVisible = false;
             LoadTaskListForSelectedTab();
         }
         else
@@ -159,6 +206,9 @@ public sealed partial class ShellViewModel : ObservableObject
             ActivityVisible = false;
             PlanPanelVisible = false;
             TaskPanelVisible = false;
+            KanbanPanelVisible = false;
+            SpecsPanelVisible = false;
+            VaultPanelVisible = false;
             LoadFileTreeForSelectedTab();
         }
         else
@@ -167,6 +217,96 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         UpdateRightPaneWidth();
         OnPropertyChanged(nameof(RightPaneOpen));
+    }
+
+    partial void OnKanbanPanelVisibleChanged(bool value)
+    {
+        if (value)
+        {
+            ActivityVisible = false;
+            PlanPanelVisible = false;
+            TaskPanelVisible = false;
+            FileExplorerPanelVisible = false;
+            SpecsPanelVisible = false;
+            VaultPanelVisible = false;
+            // Re-activate the current source against the active tab. The ctor primed
+            // CurrentSource at restore time; we just need to retarget the tab now.
+            Kanban.OnTabChanged(SelectedTab);
+            Kanban.RebuildColumns();
+        }
+        UpdateRightPaneWidth();
+        OnPropertyChanged(nameof(RightPaneOpen));
+    }
+
+    partial void OnVaultPanelVisibleChanged(bool value)
+    {
+        if (value)
+        {
+            ActivityVisible = false;
+            PlanPanelVisible = false;
+            TaskPanelVisible = false;
+            FileExplorerPanelVisible = false;
+            KanbanPanelVisible = false;
+            SpecsPanelVisible = false;
+            // Bind the vault to the active project on every show so opening the
+            // panel from the sidebar after switching tabs targets the right namespace.
+            SyncVaultActiveProject();
+        }
+        UpdateRightPaneWidth();
+        OnPropertyChanged(nameof(RightPaneOpen));
+    }
+
+    private void SyncVaultActiveProject()
+    {
+        var path = SelectedTab?.Project?.Path;
+        _vaultStore.SetActiveProject(string.IsNullOrEmpty(path) ? null : path);
+        Vault.OnActiveProjectChanged();
+    }
+
+    partial void OnPanelFontScaleChanged(double value)
+    {
+        // Persist back to settings as a point size so it round-trips with the
+        // existing FontSize knob in Settings → Appearance. Clamp to the same
+        // range the per-panel +/- buttons use; the dropdown enforces it too.
+        var clamped = System.Math.Clamp(value, 0.7, 2.5);
+        if (System.Math.Abs(clamped - value) > 0.0001) { PanelFontScale = clamped; return; }
+        OnPropertyChanged(nameof(PanelFontPercentText));
+        var size = (int)System.Math.Round(clamped * 12.0);
+        if (size <= 0) size = 12;
+        if (_settings.Current.PanelFontSize == size) return;
+        _settings.Update(_settings.Current with { PanelFontSize = size });
+    }
+
+    /// <summary>
+    /// Two-way string surface for the status-bar zoom ComboBox. Source of
+    /// truth is <see cref="PanelFontScale"/>; this property formats it as
+    /// "125%" and parses typed/selected percentages back into the scale.
+    /// Editable ComboBoxes have a fragile relationship with value-converter
+    /// bindings on <c>Text</c> (the converter ConvertBack only fires on
+    /// LostFocus and selection-via-dropdown doesn't always re-fire it), so
+    /// we expose a plain string property and do the parse here.
+    /// </summary>
+    public string PanelFontPercentText
+    {
+        get => $"{(int)System.Math.Round(PanelFontScale * 100.0)}%";
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            var trimmed = value.Trim().TrimEnd('%').Trim();
+            if (!double.TryParse(trimmed, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pct)
+                && !double.TryParse(trimmed, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out pct))
+                return;
+            var scale = System.Math.Clamp(System.Math.Round(pct) / 100.0, 0.7, 2.5);
+            if (System.Math.Abs(scale - PanelFontScale) < 0.0001)
+            {
+                // Re-emit in case user typed something the formatter rounds to
+                // the current scale (e.g. "100" when scale is already 1.0) so
+                // the box snaps back to a canonical "100%" string.
+                OnPropertyChanged(nameof(PanelFontPercentText));
+                return;
+            }
+            PanelFontScale = scale;
+        }
     }
 
     partial void OnRightPaneWidthChanged(double value)
@@ -198,6 +338,9 @@ public sealed partial class ShellViewModel : ObservableObject
         if (PlanPanelVisible) LoadPlanForSelectedTab();
         if (TaskPanelVisible) LoadTaskListForSelectedTab();
         if (FileExplorerPanelVisible) LoadFileTreeForSelectedTab();
+        if (KanbanPanelVisible) Kanban.OnTabChanged(value);
+        if (SpecsPanelVisible) Specs.OnTabChanged(value);
+        if (VaultPanelVisible) SyncVaultActiveProject();
     }
 
     partial void OnTokenomicsActiveChanged(bool value)
@@ -215,7 +358,10 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
-    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller, GitStatusService gitStatus)
+    public SpecsPanelViewModel Specs { get; }
+    public VaultViewModel Vault { get; }
+
+    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller, GitStatusService gitStatus, LiveTodoStore liveTodos, AgentCatalog agents, BuildStatusTracker buildTracker, GateRegistry gates, ToastNotifier toaster, TemplateService templateService, PromptLibrary promptLibrary, SpecsPanelViewModel specs, SkillsRepoCatalog skillsRepoCatalog, VaultStore vaultStore, VaultMcpInstaller vaultMcpInstaller, VaultViewModel vault)
     {
         _catalog = catalog;
         _settings = settings;
@@ -223,6 +369,39 @@ public sealed partial class ShellViewModel : ObservableObject
         _hooks = hooks;
         _hooksInstaller = hooksInstaller;
         _gitStatus = gitStatus;
+        _liveTodos = liveTodos;
+        _agents = agents;
+        _buildTracker = buildTracker;
+        _gates = gates;
+        _toaster = toaster;
+        _templateService = templateService;
+        _promptLibrary = promptLibrary;
+        _skillsRepoCatalog = skillsRepoCatalog;
+        _vaultStore = vaultStore;
+        _vaultMcpInstaller = vaultMcpInstaller;
+        Specs = specs;
+        Vault = vault;
+        Kanban = new KanbanViewModel(liveTodos, agents, gates, toaster, settings);
+
+        // Seed the panel-font multiplier from persisted settings. 12pt is the
+        // design baseline for panels, so size N -> scale N/12. Clamp to the
+        // same bounds the per-panel +/- buttons enforce so a stale value can't
+        // make the UI unreadable.
+        var pfs = _settings.Current.PanelFontSize;
+        if (pfs <= 0) pfs = 12;
+        _panelFontScale = System.Math.Clamp(pfs / 12.0, 0.7, 2.5);
+
+        // Pick up out-of-band edits from the Settings dialog. Marshal to the UI
+        // dispatcher because Changed fires on whatever thread called Update.
+        _settings.Changed += (_, _) =>
+        {
+            var size = _settings.Current.PanelFontSize;
+            if (size <= 0) size = 12;
+            var scale = System.Math.Clamp(size / 12.0, 0.7, 2.5);
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher is null || dispatcher.CheckAccess()) PanelFontScale = scale;
+            else dispatcher.BeginInvoke(new System.Action(() => PanelFontScale = scale));
+        };
 
         // Project list mirror — wraps the persisted ProjectDefinition records with
         // the reactive git-status chip the sidebar/welcome views render. Kept in
@@ -265,8 +444,15 @@ public sealed partial class ShellViewModel : ObservableObject
         PlanFontScaleDownCommand = new RelayCommand(() => PlanFontScale = System.Math.Max(0.7, System.Math.Round((PlanFontScale - 0.1) * 100) / 100));
         PlanFontScaleResetCommand = new RelayCommand(() => PlanFontScale = 1.0);
 
+        ZoomPanelsInCommand = new RelayCommand(() => PanelFontScale = System.Math.Min(2.5, System.Math.Round((PanelFontScale + 0.05) * 100) / 100));
+        ZoomPanelsOutCommand = new RelayCommand(() => PanelFontScale = System.Math.Max(0.7, System.Math.Round((PanelFontScale - 0.05) * 100) / 100));
+        ResetPanelZoomCommand = new RelayCommand(() => PanelFontScale = 1.0);
+
         ToggleTaskPanelCommand = new RelayCommand(() => TaskPanelVisible = !TaskPanelVisible);
         ToggleFileExplorerPanelCommand = new RelayCommand(() => FileExplorerPanelVisible = !FileExplorerPanelVisible);
+        ToggleKanbanPanelCommand = new RelayCommand(() => KanbanPanelVisible = !KanbanPanelVisible);
+        ToggleSpecsPanelCommand = new RelayCommand(() => SpecsPanelVisible = !SpecsPanelVisible);
+        ToggleVaultPanelCommand = new RelayCommand(() => VaultPanelVisible = !VaultPanelVisible);
         RefreshFileExplorerCommand = new RelayCommand(LoadFileTreeForSelectedTab);
         RefreshTaskListCommand = new RelayCommand(LoadTaskListForSelectedTab);
         SendTaskItemCommand = new RelayCommand<Drover.App.Models.TaskItem>(SendTaskItem);
@@ -281,6 +467,9 @@ public sealed partial class ShellViewModel : ObservableObject
         TaskFontScaleUpCommand = new RelayCommand(() => TaskFontScale = System.Math.Min(2.5, System.Math.Round((TaskFontScale + 0.1) * 100) / 100));
         TaskFontScaleDownCommand = new RelayCommand(() => TaskFontScale = System.Math.Max(0.7, System.Math.Round((TaskFontScale - 0.1) * 100) / 100));
         TaskFontScaleResetCommand = new RelayCommand(() => TaskFontScale = 1.0);
+        BeginAddTaskCommand = new RelayCommand(BeginAddTask);
+        CommitAddTaskCommand = new RelayCommand(CommitAddTask);
+        CancelAddTaskCommand = new RelayCommand(CancelAddTask);
         SplitRightCommand = new RelayCommand<TerminalTabViewModel>(SplitRight);
         CloseSecondaryCommand = new RelayCommand(CloseSecondary);
         ShowDashboardCommand = new RelayCommand(() => DashboardActive = !DashboardActive);
@@ -293,11 +482,200 @@ public sealed partial class ShellViewModel : ObservableObject
         SaveMemoryCommand = new RelayCommand(SaveMemory);
         FocusTabCommand = new RelayCommand<TerminalTabViewModel>(FocusTab);
         OpenTabFolderCommand = new RelayCommand<TerminalTabViewModel>(OpenTabFolder);
-        InstallHookForTabCommand = new RelayCommand<TerminalTabViewModel>(InstallHookForTab);
+
+        InitializeSpecsCommand = new RelayCommand<ProjectDefinition>(InitializeSpecs);
+        EnhanceSpecTemplateCommand = new RelayCommand<ProjectDefinition>(EnhanceSpecTemplate);
+        OpenDroverFolderCommand = new RelayCommand<ProjectDefinition>(OpenDroverFolder);
+        PromoteInterrogateCommand = new RelayCommand<Drover.App.Models.TaskItem>(PromoteInterrogate);
+    }
+
+    public RelayCommand<ProjectDefinition> InitializeSpecsCommand { get; }
+    public RelayCommand<ProjectDefinition> EnhanceSpecTemplateCommand { get; }
+    public RelayCommand<ProjectDefinition> OpenDroverFolderCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskItem> PromoteInterrogateCommand { get; }
+
+    /// <summary>
+    /// First active tab whose project root matches <paramref name="projectRoot"/>
+    /// (case-insensitive). Returns null when no tab is open for the project.
+    /// </summary>
+    private TerminalTabViewModel? FindTabForProject(string projectRoot)
+    {
+        if (string.IsNullOrEmpty(projectRoot)) return null;
+        foreach (var t in Tabs)
+        {
+            if (string.Equals(t.Project.Path, projectRoot, System.StringComparison.OrdinalIgnoreCase))
+                return t;
+        }
+        return null;
+    }
+
+    private void InitializeSpecs(ProjectDefinition? project)
+    {
+        if (project is null || string.IsNullOrEmpty(project.Path)) return;
+        try
+        {
+            _templateService.Initialize(project.Path);
+        }
+        catch (System.Exception ex)
+        {
+            StatusText = $"Initialize specs failed: {ex.Message}";
+            return;
+        }
+        StatusText = "Drover initialized. Edit .drover/spec-template.md or run Enhance spec template to tailor it.";
+    }
+
+    private void EnhanceSpecTemplate(ProjectDefinition? project)
+    {
+        if (project is null || string.IsNullOrEmpty(project.Path)) return;
+        if (!_templateService.IsInitialized(project.Path))
+        {
+            StatusText = "Run Initialize specs first.";
+            return;
+        }
+        var tab = FindTabForProject(project.Path);
+        if (tab is null)
+        {
+            StatusText = "Open a Claude Code session for this project first.";
+            return;
+        }
+        string prompt;
+        try
+        {
+            prompt = _promptLibrary.Resolve("enhance-template", project.Path);
+        }
+        catch (System.Exception ex)
+        {
+            StatusText = $"Enhance prompt failed: {ex.Message}";
+            return;
+        }
+        SelectedTab = tab;
+        tab.SendInput(prompt);
+        StatusText = "Sent: enhance spec template.";
+    }
+
+    /// <summary>
+    /// Opens the Skills browser window for <paramref name="project"/>. Resolves
+    /// (or opens) the project's terminal tab so Install can route
+    /// <c>npx skills add &lt;source&gt;</c> into a known shell, then shows
+    /// <see cref="Drover.App.Views.SkillsWindow"/> modelessly.
+    /// </summary>
+    public void OpenSkillsWindow(ProjectDefinition? project)
+    {
+        if (project is null) return;
+        var tab = FindTabForProject(project.Path);
+        if (tab is null)
+        {
+            OpenProject(project);
+            tab = FindTabForProject(project.Path);
+            if (tab is null)
+            {
+                StatusText = $"Couldn't open a tab for {project.Name}.";
+                return;
+            }
+        }
+        SelectedTab = tab;
+        var win = new Drover.App.Views.SkillsWindow(project, tab, _skillsRepoCatalog, _settings)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow,
+        };
+        win.Show();
+    }
+
+    /// <summary>
+    /// Writes the <c>drover-vault</c> MCP server entry into
+    /// <c>&lt;project&gt;/.mcp.json</c> so any Claude Code session in
+    /// that project can reach the vault. Idempotent: re-running on a
+    /// project where the entry already matches is a no-op (toast says
+    /// "already registered"), and re-running after the exe path
+    /// changed updates <c>args[1]</c>.
+    /// </summary>
+    public void EnableVaultForProject(ProjectDefinition? project)
+    {
+        if (project is null || string.IsNullOrEmpty(project.Path)) return;
+        try
+        {
+            var result = _vaultMcpInstaller.Install(project.Path);
+            string body;
+            if (result.WasFresh)
+                body = $"Vault MCP server registered for {project.Name}. Restart Claude Code sessions to pick it up.";
+            else if (result.WasUpdated)
+                body = "Vault MCP server registration updated.";
+            else
+                body = "Vault MCP server already registered.";
+
+            StatusText = body;
+            _toaster.NotifyInfo("Vault MCP", body);
+        }
+        catch (System.Exception ex)
+        {
+            var message = $"Enable vault failed: {ex.Message}";
+            StatusText = message;
+            _toaster.NotifyInfo("Vault MCP", message);
+        }
+    }
+
+    private void OpenDroverFolder(ProjectDefinition? project)
+    {
+        if (project is null || string.IsNullOrEmpty(project.Path)) return;
+        var path = System.IO.Path.Combine(project.Path, ".drover");
+        if (!System.IO.Directory.Exists(path))
+        {
+            StatusText = ".drover folder doesn't exist yet — run Initialize specs first.";
+            return;
+        }
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{path}\"")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (System.Exception ex)
+        {
+            StatusText = $"Open .drover failed: {ex.Message}";
+        }
+    }
+
+    private void PromoteInterrogate(Drover.App.Models.TaskItem? item)
+    {
+        if (item is null || SelectedTab is null) return;
+        var project = SelectedTab.Project;
+        if (string.IsNullOrEmpty(project.Path)) return;
+
+        // Make sure the .drover/ scaffold is present before sending the prompt — the
+        // prompt's first instruction is to read .drover/spec-template.md, which would
+        // dead-end if the user never ran Initialize specs.
+        if (!_templateService.IsInitialized(project.Path))
+        {
+            try { _templateService.Initialize(project.Path); }
+            catch (System.Exception ex)
+            {
+                StatusText = $"Initialize specs failed: {ex.Message}";
+                return;
+            }
+        }
+
+        // Pass the task line literally — Claude needs to match it back to the file.
+        var rawLine = string.IsNullOrEmpty(item.RawLine) ? item.Text : item.RawLine;
+        string prompt;
+        try
+        {
+            prompt = _promptLibrary.Resolve(
+                "promote-interrogate",
+                project.Path,
+                new System.Collections.Generic.Dictionary<string, string> { ["TASK_LINE"] = rawLine });
+        }
+        catch (System.Exception ex)
+        {
+            StatusText = $"Promote prompt failed: {ex.Message}";
+            return;
+        }
+        SelectedTab.SendInput(prompt);
+        var preview = item.Text.Length <= 40 ? item.Text : item.Text.Substring(0, 40) + "…";
+        TaskListStatusText = "Promoted: " + preview;
     }
 
     public RelayCommand<TerminalTabViewModel> OpenTabFolderCommand { get; }
-    public RelayCommand<TerminalTabViewModel> InstallHookForTabCommand { get; }
 
     /// <summary>
     /// Fires every time a tab pushes a Claude Code statusLine update. App.xaml.cs uses this
@@ -436,17 +814,21 @@ public sealed partial class ShellViewModel : ObservableObject
     /// Installs Drover hook entries into the project's <c>.claude/settings.local.json</c>
     /// and refreshes the per-tab status flag for every tab pointing at that path.
     /// </summary>
-    public void InstallHookForTab(TerminalTabViewModel? tab)
+    public void InstallHookForProject(ProjectDefinition? project)
     {
-        if (tab is null) return;
-        if (_hooksInstaller.TryInstallProject(tab.Project.Path))
+        if (project is null || string.IsNullOrEmpty(project.Path)) return;
+        var s = _settings.Current;
+        if (_hooksInstaller.TryInstallProject(project.Path,
+                takeOverStatusLine: s.TakeOverStatusLine,
+                hooksEnabled: s.HooksEnabled,
+                idleHookEnabled: s.IdleHookEnabled))
         {
-            RefreshHooksStatusFor(tab.Project.Path);
-            StatusText = $"hook installed in {tab.Project.Name}";
+            RefreshHooksStatusFor(project.Path);
+            StatusText = $"hook installed in {project.Name}";
         }
         else
         {
-            StatusText = $"hook install failed for {tab.Project.Name}";
+            StatusText = $"hook install failed for {project.Name}";
         }
     }
 
@@ -712,8 +1094,13 @@ public sealed partial class ShellViewModel : ObservableObject
             claudeExecutablePath: s.ClaudeExecutablePath,
             defaultClaudeModel: s.DefaultClaudeModel,
             globalEnvVars: s.GlobalEnvVars,
-            logOptions: new SessionLogOptions(s.LogKeepCount, s.LogByteBudgetMb));
-        _hooks.Register(tab.SessionId, tab.OnHookEvent);
+            logOptions: new SessionLogOptions(s.LogKeepCount, s.LogByteBudgetMb, s.SessionLogLevel));
+        _hooks.Register(tab.SessionId, evt =>
+        {
+            tab.OnHookEvent(evt);
+            _liveTodos.Ingest(evt);
+            _buildTracker.Ingest(evt, tab.Project.Path);
+        });
         _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
         tab.StatusLineUpdated += OnTabStatusLineUpdated;
         tab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
@@ -763,7 +1150,12 @@ public sealed partial class ShellViewModel : ObservableObject
             defaultClaudeModel: s2.DefaultClaudeModel,
             globalEnvVars: s2.GlobalEnvVars,
             logOptions: new SessionLogOptions(s2.LogKeepCount, s2.LogByteBudgetMb));
-        _hooks.Register(SecondaryTab.SessionId, SecondaryTab.OnHookEvent);
+        _hooks.Register(SecondaryTab.SessionId, evt =>
+        {
+            SecondaryTab.OnHookEvent(evt);
+            _liveTodos.Ingest(evt);
+            _buildTracker.Ingest(evt, SecondaryTab.Project.Path);
+        });
         _hooks.RegisterStatus(SecondaryTab.SessionId, SecondaryTab.OnStatusLine);
         SecondaryTab.StatusLineUpdated += OnTabStatusLineUpdated;
         SecondaryTab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
@@ -787,6 +1179,9 @@ public sealed partial class ShellViewModel : ObservableObject
 
     // ─── Plan panel ──────────────────────────────────────────────────────────
 
+    public RelayCommand ZoomPanelsInCommand { get; private set; } = null!;
+    public RelayCommand ZoomPanelsOutCommand { get; private set; } = null!;
+    public RelayCommand ResetPanelZoomCommand { get; private set; } = null!;
     public RelayCommand TogglePlanPanelCommand { get; private set; } = null!;
     public RelayCommand RefreshPlanCommand { get; private set; } = null!;
     public RelayCommand<Drover.App.Models.PlanTask> SendTaskCommand { get; private set; } = null!;
@@ -807,6 +1202,11 @@ public sealed partial class ShellViewModel : ObservableObject
     public RelayCommand ToggleFileExplorerPanelCommand { get; private set; } = null!;
     public RelayCommand RefreshFileExplorerCommand { get; private set; } = null!;
 
+    // ─── Kanban panel commands ──────────────────────────────────────────────
+    public RelayCommand ToggleKanbanPanelCommand { get; private set; } = null!;
+    public RelayCommand ToggleSpecsPanelCommand { get; private set; } = null!;
+    public RelayCommand ToggleVaultPanelCommand { get; private set; } = null!;
+
     // ─── Task panel commands ────────────────────────────────────────────────
     public RelayCommand ToggleTaskPanelCommand { get; private set; } = null!;
     public RelayCommand RefreshTaskListCommand { get; private set; } = null!;
@@ -821,6 +1221,9 @@ public sealed partial class ShellViewModel : ObservableObject
     public RelayCommand ReactivateSelectedTaskFileCommand { get; private set; } = null!;
     public RelayCommand TaskFontScaleUpCommand { get; private set; } = null!;
     public RelayCommand TaskFontScaleDownCommand { get; private set; } = null!;
+    public RelayCommand BeginAddTaskCommand { get; private set; } = null!;
+    public RelayCommand CommitAddTaskCommand { get; private set; } = null!;
+    public RelayCommand CancelAddTaskCommand { get; private set; } = null!;
     public RelayCommand TaskFontScaleResetCommand { get; private set; } = null!;
 
     private TaskWatcher? _taskWatcher;
@@ -1384,6 +1787,50 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             TaskListStatusText = "Save failed: " + ex.Message;
         }
+    }
+
+    private void BeginAddTask()
+    {
+        // Reveal the inline composer. Disabled at the UI level when there's no
+        // selected task file or the file is archived; this is a defensive guard.
+        if (SelectedTaskFile is null || SelectedTaskFile.IsDone) return;
+        TaskComposerText = string.Empty;
+        TaskComposerVisible = true;
+    }
+
+    private void CancelAddTask()
+    {
+        TaskComposerVisible = false;
+        TaskComposerText = string.Empty;
+    }
+
+    private void CommitAddTask()
+    {
+        if (SelectedTaskFile is null || SelectedTaskFile.IsDone) return;
+        var title = (TaskComposerText ?? string.Empty).Trim();
+        if (title.Length == 0) { CancelAddTask(); return; }
+
+        try
+        {
+            var path = SelectedTaskFile.AbsolutePath;
+            var existing = System.IO.File.Exists(path) ? System.IO.File.ReadAllText(path) : string.Empty;
+            // Append at the end of the file. If sections exist, the new line attaches
+            // to the last section as parsed by TaskReader — fine for a quick-add. Users
+            // who want precise placement can drop into edit mode.
+            var needsLeadingNewline = existing.Length > 0 && !existing.EndsWith("\n");
+            var separator = needsLeadingNewline ? System.Environment.NewLine : string.Empty;
+            var addition = $"{separator}- [ ] {title}{System.Environment.NewLine}";
+            AtomicFile.WriteAllText(path, existing + addition);
+            CurrentTaskList = TaskReader.ReadFile(path);
+            TaskListStatusText = "Added task " + System.DateTime.Now.ToString("HH:mm:ss");
+        }
+        catch (System.Exception ex)
+        {
+            TaskListStatusText = "Add failed: " + ex.Message;
+        }
+
+        TaskComposerText = string.Empty;
+        TaskComposerVisible = false;
     }
 
     private void MarkSelectedTaskFileDone()

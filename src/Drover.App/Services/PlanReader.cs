@@ -8,7 +8,7 @@ public static class PlanReader
 {
     private static readonly Regex HeadingRx = new(@"^(#{2,3})\s+(.+?)\s*$", RegexOptions.Compiled);
     private static readonly Regex IgnoredHeadingRx = new(@"^(#{1}|#{4,})\s+.+?\s*$", RegexOptions.Compiled);
-    private static readonly Regex TaskRx = new(@"^(\s*)([-*])\s+\[([ xX])\]\s+(.+?)\s*$", RegexOptions.Compiled);
+    private static readonly Regex TaskRx = new(@"^(\s*)([-*])\s+\[([ xX/~])\]\s+(.+?)\s*$", RegexOptions.Compiled);
     private static readonly Regex FenceRx = new(@"^\s*```", RegexOptions.Compiled);
     private static readonly Regex WhitespaceRx = new(@"\s+", RegexOptions.Compiled);
 
@@ -174,9 +174,12 @@ public static class PlanReader
             {
                 var indentRaw = taskMatch.Groups[1].Value;
                 int indentLevel = ComputeIndent(indentRaw);
-                bool isDone = taskMatch.Groups[3].Value.Equals("x", System.StringComparison.OrdinalIgnoreCase);
+                var marker = taskMatch.Groups[3].Value;
+                bool isDone = marker.Equals("x", System.StringComparison.OrdinalIgnoreCase);
+                bool isInProgress = marker == "/";
+                bool isPlanned = marker == "~";
                 var text = taskMatch.Groups[4].Value;
-                var task = new PlanTask(lineNum, text, isDone, indentLevel);
+                var task = new PlanTask(lineNum, text, isDone, indentLevel, isInProgress, isPlanned);
 
                 if (curHeadingLine is null)
                 {

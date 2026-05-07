@@ -8,9 +8,13 @@ namespace Drover.App.Services;
 /// <summary>
 /// Bootstraps Claude Code's hooks integration: writes our forwarder script to
 /// <c>%APPDATA%\Drover\hooks\drover-hook.ps1</c>, then merges hook entries
-/// pointing at it into <c>%USERPROFILE%\.claude\settings.json</c>. The script
-/// is a no-op when DROVER_HOOKS_URL / DROVER_SESSION_ID aren't set, so leaving
-/// the entries in place when Drover isn't running is harmless.
+/// pointing at it into the project's <c>.claude/settings.local.json</c>. The
+/// script is a no-op when DROVER_HOOKS_URL / DROVER_SESSION_ID aren't set, so
+/// leaving the entries in place when Drover isn't running is harmless.
+///
+/// Project-scoped only: Drover never writes to the global
+/// <c>~/.claude/settings.json</c>. <see cref="TryUninstallGlobal"/> exists to
+/// strip any pre-existing global entries from earlier Drover versions.
 ///
 /// Idempotent: re-running rewrites our entries while preserving any other
 /// hooks the user has configured. Identification is by exact script-path match
@@ -81,6 +85,8 @@ public sealed class HooksInstaller
         "SubagentStop",
         "SessionStart",
         "SessionEnd",
+        "TaskCreated",
+        "TaskCompleted",
     };
 
     public string ScriptPath { get; }
@@ -103,22 +109,23 @@ public sealed class HooksInstaller
     }
 
     /// <summary>
-    /// Reconciles Drover's entries in <c>~/.claude/settings.json</c> against the
-    /// supplied flags. When <paramref name="hooksEnabled"/> is false, all Drover
-    /// hook entries are stripped and statusLine takeover is undone regardless of
-    /// <paramref name="takeOverStatusLine"/>. When <paramref name="idleHookEnabled"/>
-    /// is false, the <c>Stop</c> event entry is removed (other events stay).
+    /// Strips any Drover entries from the global <c>~/.claude/settings.json</c>.
+    /// Drover no longer writes there — install is project-scoped only — so this
+    /// runs on startup as a one-shot migration to clean up entries left by older
+    /// Drover versions. User-managed hooks and statusLine entries are untouched.
     /// </summary>
-    public bool TryInstall(bool takeOverStatusLine, bool hooksEnabled = true, bool idleHookEnabled = true)
+    public bool TryUninstallGlobal()
     {
         try
         {
-            // statusLine takeover and event hooks are independent integrations —
-            // each writes its own forwarder script only when the corresponding
-            // setting is on.
-            if (hooksEnabled) EnsureScript();
-            if (takeOverStatusLine) EnsureStatusScript();
-            MergeIntoFile(SettingsPath, requireParentDir: true, takeOverStatusLine, hooksEnabled, idleHookEnabled);
+            // Nothing to do if the file doesn't exist. Don't materialise it.
+            if (!File.Exists(SettingsPath)) return true;
+            // MergeIntoFile with everything-off removes Drover entries and
+            // restores any backed-up third-party statusLine, leaving non-Drover
+            // hooks intact. requireParentDir=true means we won't create
+            // ~/.claude/ if the user has somehow removed it.
+            MergeIntoFile(SettingsPath, requireParentDir: true,
+                takeOverStatusLine: false, hooksEnabled: false, idleHookEnabled: false);
             return true;
         }
         catch
@@ -128,26 +135,22 @@ public sealed class HooksInstaller
     }
 
     /// <summary>
-    /// Installs Drover hooks into <c>&lt;project&gt;/.claude/settings.local.json</c>.
-    /// Per-project install is scoped to that project (Claude reads settings.local.json
-    /// in addition to global) and is the conventional place for un-committed local
-    /// overrides. Returns true on success.
+    /// Installs Drover hooks (and, if <paramref name="takeOverStatusLine"/> is
+    /// true, the statusLine takeover) into <c>&lt;project&gt;/.claude/settings.local.json</c>.
+    /// This is the only path Drover uses to write hook config — the global
+    /// <c>~/.claude/settings.json</c> is never touched here. Returns true on success.
     /// </summary>
-    public bool TryInstallProject(string projectPath, bool hooksEnabled = true, bool idleHookEnabled = true)
+    public bool TryInstallProject(string projectPath, bool takeOverStatusLine = false, bool hooksEnabled = true, bool idleHookEnabled = true)
     {
         if (string.IsNullOrWhiteSpace(projectPath) || !Directory.Exists(projectPath)) return false;
         try
         {
-            // Per-project install only carries event hooks — the statusLine slot
-            // lives in the global settings file. Status forwarder script isn't
-            // needed here.
             if (hooksEnabled) EnsureScript();
+            if (takeOverStatusLine) EnsureStatusScript();
             var dotClaude = Path.Combine(projectPath, ".claude");
             Directory.CreateDirectory(dotClaude);
             var target = Path.Combine(dotClaude, "settings.local.json");
-            // Per-project install never claims the statusLine slot — the global
-            // settings file owns that. Project files only carry hook entries.
-            MergeIntoFile(target, requireParentDir: false, takeOverStatusLine: false, hooksEnabled, idleHookEnabled);
+            MergeIntoFile(target, requireParentDir: false, takeOverStatusLine, hooksEnabled, idleHookEnabled);
             return true;
         }
         catch
@@ -157,14 +160,15 @@ public sealed class HooksInstaller
     }
 
     /// <summary>
-    /// Returns true if a Drover hook entry is present in any settings file that would
-    /// apply to this project: the project's settings.json / settings.local.json, or the
-    /// global ~/.claude/settings.json. The check is a substring match against our
-    /// script path — cheap and good enough.
+    /// Returns true if a Drover hook entry is present in either of the project's
+    /// settings files (<c>settings.json</c> or <c>settings.local.json</c>). The
+    /// global file is intentionally not consulted: Drover only installs into
+    /// project scope, so the global file should never contain our entries — and
+    /// counting it would falsely report &quot;installed&quot; for every project after a
+    /// migration where stale global entries are still being cleaned up.
     /// </summary>
     public bool IsInstalledForProject(string projectPath)
     {
-        if (ContainsDroverHook(SettingsPath)) return true;
         if (string.IsNullOrWhiteSpace(projectPath)) return false;
         var dotClaude = Path.Combine(projectPath, ".claude");
         return ContainsDroverHook(Path.Combine(dotClaude, "settings.json"))

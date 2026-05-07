@@ -79,6 +79,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     private AttentionMonitor? _monitor;
     private ClipboardIntegration? _clipboard;
     private SessionLogger? _logger;
+    private TranscriptCapture? _transcript;
     private DroverTerminal? _control;
 
     public TerminalTabViewModel(
@@ -322,6 +323,14 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         _logger = new SessionLogger(control, Title, LogOptions);
         _logger.Attach();
 
+        // The clean transcript runs in parallel with the raw VT trace. It's driven by
+        // hook events (see OnHookEvent) and reads CC's own JSONL — no ANSI scraping.
+        if (_logger.TranscriptPath is { } tp)
+        {
+            _transcript = new TranscriptCapture(tp);
+            _transcript.Attach();
+        }
+
         _monitor = new AttentionMonitor(control);
         _monitor.StateChanged += (_, s) => SetAttention(s);
         _monitor.Attach();
@@ -563,6 +572,11 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         // the PTY read-loop free of regex work on every output chunk.
         _monitor?.Detach();
 
+        // Same hook stream feeds the clean transcript writer. Boundary events
+        // (UserPromptSubmit / PostToolUse / Stop) carry transcript_path; the
+        // capturer tails CC's JSONL incrementally.
+        _transcript?.OnHookEvent(evt);
+
         var next = evt.Type switch
         {
             "UserPromptSubmit" => AttentionState.Working,
@@ -586,7 +600,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         // text; any other hook (Stop / UserPromptSubmit / a tool event) means
         // the prompt has been resolved or superseded, so clear it. Marshal to
         // UI thread because the gateway calls this from a background task.
-        if (evt.Type == "Notification")
+        if (evt.Type == "Notification" && !IsIdleInputNudge(evt.Message))
         {
             var msg = string.IsNullOrWhiteSpace(evt.Message)
                 ? "Claude needs your attention"
@@ -626,6 +640,14 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
             });
         }
     }
+
+    // CC fires a Notification ~60s after Stop with "Claude is waiting for your input"
+    // when the user hasn't typed anything. The Idle dot already conveys this and Stop
+    // already raised a TaskbarFlash + idle toast, so the strip is redundant and stays
+    // stuck until another hook arrives. Filter it out here.
+    private static bool IsIdleInputNudge(string? message)
+        => !string.IsNullOrEmpty(message)
+           && message.Contains("waiting for your input", StringComparison.OrdinalIgnoreCase);
 
     private static string FriendlyToolLabel(string tool) => tool switch
     {
@@ -718,12 +740,36 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         else app.Dispatcher.BeginInvoke((Action)Apply);
     }
 
+    /// <summary>
+    /// Exposes the live ConPTY connection for callers that need to subscribe
+    /// to the output stream (e.g. the session-driven loop runner parsing
+    /// <c>[loop:*]</c> tokens). Returns null until the terminal control has
+    /// finished its async attach. The caller must tolerate a later-arriving
+    /// connection by re-calling on each interaction.
+    /// </summary>
+    public ConPtyConnection? GetCurrentConnection() => _control?.Connection;
+
     public bool SendInput(string text, bool appendReturn = true)
     {
         var control = _control;
         var pty = control?.Connection;
         if (pty is null) return false;
-        var payload = appendReturn ? text + "\r" : text;
+
+        // Multi-line input must be wrapped in bracketed-paste markers, mirroring
+        // ClipboardIntegration's Ctrl+V path. Without them, Claude Code's TUI
+        // interprets each embedded newline as Enter and submits the prompt
+        // piecemeal — the user only sees the trailing fragment as a message.
+        string payload;
+        if (text.IndexOf('\n') >= 0 || text.IndexOf('\r') >= 0)
+        {
+            var normalized = text.Replace("\r\n", "\r").Replace("\n", "\r");
+            payload = "\x1b[200~" + normalized + "\x1b[201~" + (appendReturn ? "\r" : string.Empty);
+        }
+        else
+        {
+            payload = appendReturn ? text + "\r" : text;
+        }
+
         try { pty.WriteToTerm(payload); }
         catch { return false; }
         FocusTerminal(control);
@@ -787,6 +833,8 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         _toolDecayTimer = null;
         _logger?.Dispose();
         _logger = null;
+        _transcript?.Dispose();
+        _transcript = null;
         _monitor = null;
 
         // Terminate the PTY explicitly so closing a tab mid-stream tears the

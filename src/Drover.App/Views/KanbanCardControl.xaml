@@ -1,0 +1,227 @@
+<UserControl x:Class="Drover.App.Views.KanbanCardControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:m="clr-namespace:Drover.App.Models"
+             xmlns:vm="clr-namespace:Drover.App.ViewModels"
+             xmlns:views="clr-namespace:Drover.App.Views"
+             Background="Transparent">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <views:RelativeTimeConverter x:Key="RelativeTime" />
+        <views:SourceRefBasenameConverter x:Key="SourceBasename" />
+    </UserControl.Resources>
+
+    <!-- Outer card. The visual structure is:
+           [3 px status stripe] [card body, 8 px padded]
+         The body is two rows: title, then a meta row that switches between a quiet
+         summary (when collapsed) and a full detail block (when expanded). Hover
+         reveals the chevron without changing card height. -->
+    <Border x:Name="Card"
+            Background="{StaticResource Kanban.CardBg}"
+            BorderBrush="{StaticResource Kanban.CardBorder}"
+            BorderThickness="1"
+            CornerRadius="4"
+            Margin="0,0,0,6"
+            MouseLeftButtonDown="OnCardMouseLeftButtonDown"
+            MouseMove="OnCardMouseMove"
+            MouseLeftButtonUp="OnCardMouseLeftButtonUp">
+        <Border.ContextMenu>
+            <ContextMenu>
+                <MenuItem Header="Send to agent" x:Name="SendToAgentMenu" />
+                <Separator />
+                <MenuItem Header="Open file…" Click="OnOpenFileClicked" />
+            </ContextMenu>
+        </Border.ContextMenu>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Status stripe — encodes status without a coloured border around the
+                 entire card. Backlog is the muted default; the others highlight. -->
+            <Border Grid.Column="0">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{StaticResource Kanban.StripeBacklog}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Status}" Value="Planned">
+                                <Setter Property="Background" Value="{StaticResource Kanban.StripePlanned}" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Status}" Value="InProgress">
+                                <Setter Property="Background" Value="{StaticResource Kanban.StripeInProgress}" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Status}" Value="Completed">
+                                <Setter Property="Background" Value="{StaticResource Kanban.StripeCompleted}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+            </Border>
+
+            <!-- Body -->
+            <StackPanel Grid.Column="1" Margin="8,8,8,8">
+                <!-- Title row: title (wraps), chevron only on hover or when expanded.
+                     The chevron is collapsed entirely when there are no children. -->
+                <DockPanel LastChildFill="True">
+                    <ToggleButton x:Name="ExpandToggle"
+                                  DockPanel.Dock="Right"
+                                  Width="16" Height="16"
+                                  Padding="0"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  FontSize="9"
+                                  Foreground="{StaticResource Chrome.TextMuted}"
+                                  Cursor="Hand"
+                                  FocusVisualStyle="{x:Null}"
+                                  ToolTip="Toggle details">
+                        <ToggleButton.Style>
+                            <Style TargetType="ToggleButton">
+                                <Setter Property="Content" Value="▸" />
+                                <Setter Property="Opacity" Value="0" />
+                                <Style.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter Property="Content" Value="▾" />
+                                        <Setter Property="Opacity" Value="1" />
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding IsMouseOver, ElementName=Card}" Value="True">
+                                        <Setter Property="Opacity" Value="1" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding HasDetails}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ToggleButton.Style>
+                    </ToggleButton>
+
+                    <TextBlock Text="{Binding Title}"
+                               Foreground="{StaticResource Chrome.Text}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               LineHeight="17"
+                               LineStackingStrategy="BlockLineHeight" />
+                </DockPanel>
+
+                <!-- Quiet meta row (collapsed state). One line, 10 px muted. Combines
+                     subtask count, source basename, and relative time when present.
+                     Hidden when the card is expanded so the expanded block can take over. -->
+                <DockPanel LastChildFill="False" Margin="0,4,0,0">
+                    <DockPanel.Style>
+                        <Style TargetType="DockPanel">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsChecked, ElementName=ExpandToggle}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DockPanel.Style>
+
+                    <Ellipse DockPanel.Dock="Right"
+                             Width="6" Height="6"
+                             Margin="6,0,0,0"
+                             VerticalAlignment="Center"
+                             Fill="{StaticResource Chrome.AttentionWorking}"
+                             Visibility="{Binding Badges.ActivePulse, Converter={StaticResource BoolToVis}}"
+                             ToolTip="Recently active in the current terminal" />
+
+                    <TextBlock DockPanel.Dock="Left"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="10"
+                               TextTrimming="CharacterEllipsis">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasMeta}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                        <Run Text="{Binding MetaSummary, Mode=OneWay}" />
+                    </TextBlock>
+                </DockPanel>
+
+                <!-- Expanded block — sub-checklist + gates + source filename. Shown only
+                     when the chevron is toggled on. -->
+                <StackPanel Margin="0,4,0,0"
+                            Visibility="{Binding IsChecked, ElementName=ExpandToggle, Converter={StaticResource BoolToVis}}">
+                    <ItemsControl ItemsSource="{Binding SubChecklist}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type m:KanbanSubItem}">
+                                <CheckBox Content="{Binding Text}"
+                                          IsChecked="{Binding IsDone, Mode=OneWay}"
+                                          Foreground="{StaticResource Chrome.TextMuted}"
+                                          FontSize="11"
+                                          Margin="0,2,0,0"
+                                          Tag="{Binding LineNumber}"
+                                          Click="OnSubItemClicked" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <ItemsControl ItemsSource="{Binding Gates}" Margin="0,4,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type m:KanbanGate}">
+                                <Border Margin="0,0,4,0"
+                                        Padding="6,1"
+                                        CornerRadius="3"
+                                        BorderThickness="1"
+                                        ToolTip="{Binding Detail}">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{StaticResource Kanban.GatePending}" />
+                                            <Setter Property="BorderBrush" Value="{StaticResource Kanban.GatePending}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Passed}" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource Kanban.GateOk}" />
+                                                    <Setter Property="BorderBrush" Value="{StaticResource Kanban.GateOk}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Passed}" Value="False">
+                                                    <Setter Property="Background" Value="{StaticResource Kanban.GateBlocked}" />
+                                                    <Setter Property="BorderBrush" Value="{StaticResource Kanban.GateBlocked}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding Kind}"
+                                               Foreground="White"
+                                               FontSize="9"
+                                               FontWeight="SemiBold" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="{Binding SourceRef, Converter={StaticResource SourceBasename}}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="10"
+                               Margin="0,4,0,0"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+
+        <!-- Card-level hover state — quieter than the previous coloured border because
+             the stripe already encodes status. -->
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource Kanban.CardBg}" />
+                <Setter Property="BorderBrush" Value="{StaticResource Kanban.CardBorder}" />
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="{StaticResource Kanban.CardBgHover}" />
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
+    </Border>
+</UserControl>

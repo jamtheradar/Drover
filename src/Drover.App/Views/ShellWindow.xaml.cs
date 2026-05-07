@@ -239,6 +239,7 @@ public partial class ShellWindow : Window
         Bind(sc.TogglePlanPanel, TogglePlanPanelHalfWidth);
         Bind(sc.ToggleTaskPanel, ToggleTaskPanelHalfWidth);
         Bind(sc.ToggleFileExplorerPanel, ToggleFileExplorerPanelDefaultWidth);
+        Bind(sc.ToggleKanbanPanel, ToggleKanbanPanelHalfWidth);
     }
 
     /// <summary>
@@ -270,6 +271,23 @@ public partial class ShellWindow : Window
         if (halfWidth < 240) halfWidth = 240;
         if (halfWidth > 1400) halfWidth = 1400;
         vm.RightPaneWidth = halfWidth;
+    }
+
+    /// <summary>
+    /// Toggles the kanban board panel. Opens at 60% width — three columns need more
+    /// horizontal room than Plan/Task to avoid card text wrapping aggressively.
+    /// </summary>
+    private void ToggleKanbanPanelHalfWidth()
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        var willOpen = !vm.KanbanPanelVisible;
+        vm.KanbanPanelVisible = willOpen;
+        if (!willOpen) return;
+
+        var w = ActualWidth * 0.6;
+        if (w < 480) w = 480;
+        if (w > 1600) w = 1600;
+        vm.RightPaneWidth = w;
     }
 
     /// <summary>
@@ -675,8 +693,8 @@ public partial class ShellWindow : Window
     private void InstallHook_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not ShellViewModel vm) return;
-        if (sender is System.Windows.Controls.MenuItem mi && mi.Tag is ViewModels.TerminalTabViewModel tab)
-            vm.InstallHookForTab(tab);
+        if (sender is System.Windows.Controls.MenuItem mi && mi.Tag is Models.ProjectDefinition project)
+            vm.InstallHookForProject(project);
     }
 
     private void OpenHooksLog_Click(object sender, RoutedEventArgs e)
@@ -724,6 +742,139 @@ public partial class ShellWindow : Window
         vm.OpenProjectDangerously(project);
     }
 
+    /// <summary>
+    /// Hides Initialize specs / Enhance spec template / Open .drover folder
+    /// based on whether <c>.drover/spec-template.md</c> exists for the project.
+    /// Initialize is shown when uninitialized; the other two are shown after.
+    /// </summary>
+    private void ProjectContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ContextMenu cm) return;
+        if (cm.PlacementTarget is not FrameworkElement fe) return;
+        if (fe.DataContext is not ViewModels.ProjectListItem item) return;
+        var project = item.Project;
+        var templates = (App.Current as App)?.Services.GetService(typeof(Services.TemplateService)) as Services.TemplateService;
+        var initialized = templates?.IsInitialized(project.Path) ?? false;
+        var hooks = (App.Current as App)?.Services.GetService(typeof(Services.HooksInstaller)) as Services.HooksInstaller;
+        var hookInstalled = hooks?.IsInstalledForProject(project.Path) ?? false;
+
+        foreach (var child in cm.Items)
+        {
+            if (child is not System.Windows.Controls.MenuItem topItem) continue;
+            if (topItem.Header is not string header || header != "Drover") continue;
+            foreach (var sub in topItem.Items)
+            {
+                if (sub is not System.Windows.Controls.MenuItem mi) continue;
+                if (mi.Name == "InstallHookProjectMenuItem")
+                {
+                    mi.Header = hookInstalled
+                        ? "Reinstall Drover hook in project"
+                        : "Install Drover hook in project";
+                    continue;
+                }
+                if (mi.Header is not string h) continue;
+                mi.Visibility = h switch
+                {
+                    "Initialize specs" => initialized ? Visibility.Collapsed : Visibility.Visible,
+                    "Enhance spec template" => initialized ? Visibility.Visible : Visibility.Collapsed,
+                    "Open .drover folder" => initialized ? Visibility.Visible : Visibility.Collapsed,
+                    _ => mi.Visibility,
+                };
+            }
+        }
+    }
+
+    private void AddSkill_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is not System.Windows.Controls.MenuItem mi) return;
+        if (mi.Tag is not Models.ProjectDefinition project) return;
+        vm.OpenSkillsWindow(project);
+    }
+
+
+    private void EnableVault_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is not System.Windows.Controls.MenuItem mi) return;
+        if (mi.Tag is not Models.ProjectDefinition project) return;
+        vm.EnableVaultForProject(project);
+    }
+
+    private void InitializeSpecs_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is not System.Windows.Controls.MenuItem mi) return;
+        if (mi.Tag is not Models.ProjectDefinition project) return;
+        vm.InitializeSpecsCommand.Execute(project);
+    }
+
+    private void EnhanceSpecTemplate_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is not System.Windows.Controls.MenuItem mi) return;
+        if (mi.Tag is not Models.ProjectDefinition project) return;
+        vm.EnhanceSpecTemplateCommand.Execute(project);
+    }
+
+    private void OpenDroverFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is not System.Windows.Controls.MenuItem mi) return;
+        if (mi.Tag is not Models.ProjectDefinition project) return;
+        vm.OpenDroverFolderCommand.Execute(project);
+    }
+
+    private void ShowFilesPanel_Click(object sender, RoutedEventArgs e) =>
+        OpenProjectAndShowPanel(sender, vm => vm.FileExplorerPanelVisible = true);
+
+    private void ShowSpecsPanel_Click(object sender, RoutedEventArgs e) =>
+        OpenProjectAndShowPanel(sender, vm => vm.SpecsPanelVisible = true);
+
+    private void ShowKanbanPanel_Click(object sender, RoutedEventArgs e) =>
+        OpenProjectAndShowPanel(sender, vm => vm.KanbanPanelVisible = true);
+
+    private void ShowTasksPanel_Click(object sender, RoutedEventArgs e) =>
+        OpenProjectAndShowPanel(sender, vm => vm.TaskPanelVisible = true);
+
+    private void ShowPlanPanel_Click(object sender, RoutedEventArgs e) =>
+        OpenProjectAndShowPanel(sender, vm => vm.PlanPanelVisible = true);
+
+    private void ShowVaultPanel_Click(object sender, RoutedEventArgs e) =>
+        OpenProjectAndShowPanel(sender, vm => vm.VaultPanelVisible = true);
+
+    private void OpenProjectAndShowPanel(object sender, System.Action<ShellViewModel> show)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is not System.Windows.FrameworkElement fe) return;
+        if (fe.Tag is not Models.ProjectDefinition project) return;
+
+        // Focus an existing tab for this project if one is open; only spawn a new
+        // terminal when there's nothing to focus. Without this, every panel-shortcut
+        // click would launch another Claude session.
+        TerminalTabViewModel? existing = null;
+        foreach (var t in vm.Tabs)
+        {
+            if (ReferenceEquals(t.Project, project) || t.Project.Name == project.Name)
+            {
+                existing = t;
+                break;
+            }
+        }
+        if (existing is not null)
+        {
+            vm.SelectedTab = existing;
+            vm.DashboardActive = false;
+            vm.TokenomicsActive = false;
+            vm.MemoryActive = false;
+        }
+        else
+        {
+            vm.OpenProjectCommand.Execute(project);
+        }
+        show(vm);
+    }
+
     private void EditProject_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not ShellViewModel vm) return;
@@ -764,6 +915,31 @@ public partial class ShellWindow : Window
             if (v is TerminalTabView tv && ReferenceEquals(tv.DataContext, tab)) return tv;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Push the picked percent ("125%") straight into <see cref="ShellViewModel.PanelFontPercentText"/>.
+    /// We can't rely on the bound TextBox alone because the ComboBox's Text-binding has
+    /// <c>UpdateSourceTrigger=LostFocus</c> (so partial typed values don't clamp), and the
+    /// dropdown selection commits without losing focus — the binding would otherwise sit
+    /// dirty until the user clicked elsewhere.
+    /// </summary>
+    private void PanelZoomCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (e.AddedItems.Count == 0) return;
+        if (DataContext is not ViewModels.ShellViewModel vm) return;
+        if (e.AddedItems[0]?.ToString() is { } pick && pick.Length > 0)
+            vm.PanelFontPercentText = pick;
+    }
+
+    /// <summary>Commit a typed value on Enter without waiting for focus to leave.</summary>
+    private void PanelZoomCombo_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter) return;
+        if (sender is not System.Windows.Controls.ComboBox cb) return;
+        var be = cb.GetBindingExpression(System.Windows.Controls.ComboBox.TextProperty);
+        be?.UpdateSource();
+        e.Handled = true;
     }
 
     private static System.Collections.Generic.IEnumerable<DependencyObject> Descendants(DependencyObject root)

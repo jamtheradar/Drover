@@ -65,6 +65,22 @@ public sealed class ToastNotifier
         }
     }
 
+    /// <summary>
+    /// Generic two-line toast for transient feedback (e.g. "Vault MCP
+    /// registered for foo"). No activation argument — clicking dismisses.
+    /// </summary>
+    public void NotifyInfo(string title, string body)
+    {
+        try
+        {
+            new ToastContentBuilder()
+                .AddText(title)
+                .AddText(body)
+                .Show();
+        }
+        catch { /* no toast capability — ignore */ }
+    }
+
     public void NotifyUpdateAvailable(string version)
     {
         try
@@ -125,6 +141,23 @@ public sealed class ToastNotifier
                 .AddText("Claude needs your input")
                 .AddText(tab.Title)
                 .AddText(message)
+                .Show();
+        }
+        catch { /* no toast capability on this host — ignore */ }
+    }
+
+    /// <summary>
+    /// Toast surfaced when a kanban Completed-drop is blocked by a failing gate.
+    /// Names the card and the failing gate so the user knows what to fix.
+    /// </summary>
+    public void NotifyKanbanGateBlocked(string cardTitle, string blockerSummary)
+    {
+        try
+        {
+            new ToastContentBuilder()
+                .AddText("Kanban move blocked")
+                .AddText(cardTitle)
+                .AddText(blockerSummary)
                 .Show();
         }
         catch { /* no toast capability on this host — ignore */ }

@@ -12,12 +12,28 @@ public sealed class FileExplorerWatcher : System.IDisposable
     private System.IO.FileSystemWatcher? _watcher;
     private System.Threading.Timer? _debounce;
     private readonly object _lock = new();
+    private string? _projectPath;
+
+    /// <summary>
+    /// Path fragments under the project root whose changes are ignored. Encoded as data
+    /// (rather than scattered <c>.Where(...)</c> filters) so adding new ignores is one line.
+    /// </summary>
+    private static readonly string[] IgnoredRelativePrefixes =
+    {
+        // Spec workflow writes timestamped backups under .drover/history/. Without this
+        // ignore, every Enhance run would burst hundreds of file events through the watcher
+        // and cause UI refresh storms in the explorer pane.
+        ".drover" + System.IO.Path.DirectorySeparatorChar + "history" + System.IO.Path.DirectorySeparatorChar,
+        ".drover" + System.IO.Path.AltDirectorySeparatorChar + "history" + System.IO.Path.AltDirectorySeparatorChar,
+    };
 
     public void Watch(string projectPath)
     {
         Stop();
         if (string.IsNullOrEmpty(projectPath) || !System.IO.Directory.Exists(projectPath))
             return;
+
+        _projectPath = projectPath;
 
         try
         {
@@ -55,17 +71,35 @@ public sealed class FileExplorerWatcher : System.IDisposable
             }
             _debounce?.Dispose();
             _debounce = null;
+            _projectPath = null;
         }
     }
 
-    private void OnAny(object _, System.IO.FileSystemEventArgs __)
+    private void OnAny(object _, System.IO.FileSystemEventArgs e)
     {
+        if (IsIgnored(e.FullPath)) return;
         lock (_lock)
         {
             _debounce?.Dispose();
             _debounce = new System.Threading.Timer(_ => Changed?.Invoke(this, System.EventArgs.Empty),
                 null, 250, System.Threading.Timeout.Infinite);
         }
+    }
+
+    private bool IsIgnored(string fullPath)
+    {
+        var root = _projectPath;
+        if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(fullPath)) return false;
+        if (!fullPath.StartsWith(root, System.StringComparison.OrdinalIgnoreCase)) return false;
+        var rel = fullPath.Substring(root.Length).TrimStart(
+            System.IO.Path.DirectorySeparatorChar,
+            System.IO.Path.AltDirectorySeparatorChar);
+        foreach (var prefix in IgnoredRelativePrefixes)
+        {
+            if (rel.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     public void Dispose() => Stop();

@@ -6,11 +6,33 @@ using Drover.App.Terminal;
 namespace Drover.App.Services;
 
 /// <summary>
+/// How much per-tab logging Drover writes to disk.
+/// <list type="bullet">
+/// <item><b>Off</b> — no raw .log, no .transcript.md.</item>
+/// <item><b>Transcript</b> (default) — only the clean Markdown transcript driven by hook
+/// boundaries (UserPromptSubmit / PostToolUse / Stop). The raw VT stream is not captured.
+/// This is what you'd actually want to read or share later.</item>
+/// <item><b>Full</b> — both the raw VT trace and the clean transcript. Useful when
+/// diagnosing rendering bugs or terminal-replay scenarios where the redraw stream
+/// matters; otherwise the trace is noise.</item>
+/// </list>
+/// </summary>
+public enum SessionLogLevel
+{
+    Off,
+    Transcript,
+    Full,
+}
+
+/// <summary>
 /// Retention knobs for <see cref="SessionLogger"/>. KeepCount=0 disables the count cap;
 /// ByteBudgetMb=0 disables the byte cap. Defaults match the historical 50-files / 500MB
 /// policy that was hardcoded before per-user knobs existed.
 /// </summary>
-public sealed record SessionLogOptions(int KeepCount = 50, int ByteBudgetMb = 500);
+public sealed record SessionLogOptions(
+    int KeepCount = 50,
+    int ByteBudgetMb = 500,
+    SessionLogLevel Level = SessionLogLevel.Transcript);
 
 /// <summary>
 /// Tees the terminal's output stream to a per-session log file under %APPDATA%\Drover\logs.
@@ -34,16 +56,32 @@ public sealed class SessionLogger : IDisposable
     private readonly record struct LogItem(string? Text, ManualResetEventSlim? FlushDone);
 
     private readonly DroverTerminal _control;
+    private readonly SessionLogLevel _level;
     private StreamWriter? _writer;
     private BlockingCollection<LogItem>? _queue;
     private Thread? _worker;
 
-    public string Path { get; }
+    /// <summary>
+    /// Path to the raw VT trace. Null when <see cref="SessionLogLevel"/> is not <c>Full</c> —
+    /// no raw file is written in that mode and consumers (export, find-in-log, "open log file")
+    /// should skip.
+    /// </summary>
+    public string? Path { get; }
+
+    /// <summary>
+    /// Sibling .transcript.md path. Always populated except when <see cref="SessionLogLevel"/>
+    /// is <c>Off</c>. <see cref="TranscriptCapture"/> opens this file and writes the clean
+    /// human-readable conversation derived from CC's JSONL.
+    /// </summary>
+    public string? TranscriptPath { get; }
+
+    public SessionLogLevel Level => _level;
 
     public SessionLogger(DroverTerminal control, string tabTitle, SessionLogOptions? options = null)
     {
         _control = control;
         var opts = options ?? new SessionLogOptions();
+        _level = opts.Level;
         var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Drover", "logs");
         Directory.CreateDirectory(dir);
         var byteBudget = opts.ByteBudgetMb <= 0 ? long.MaxValue : (long)opts.ByteBudgetMb * 1024 * 1024;
@@ -51,14 +89,23 @@ public sealed class SessionLogger : IDisposable
         PruneOldLogs(dir, keepCount, byteBudget);
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var safeTitle = Sanitize(tabTitle);
-        Path = System.IO.Path.Combine(dir, $"{stamp}_{safeTitle}.log");
+        var basePath = System.IO.Path.Combine(dir, $"{stamp}_{safeTitle}");
+        Path = _level == SessionLogLevel.Full ? basePath + ".log" : null;
+        TranscriptPath = _level == SessionLogLevel.Off ? null : basePath + ".transcript.md";
     }
 
     private static void PruneOldLogs(string dir, int keepCount, long byteBudget)
     {
         try
         {
-            var files = new DirectoryInfo(dir).GetFiles("*.log");
+            // Prune both raw .log and clean .transcript.md — they share the stamp prefix
+            // and the same retention budget so the two stay in step. Mixed list is sorted
+            // by mtime; trailing files past the cap go regardless of extension.
+            var raw = new DirectoryInfo(dir).GetFiles("*.log");
+            var transcripts = new DirectoryInfo(dir).GetFiles("*.transcript.md");
+            var files = new FileInfo[raw.Length + transcripts.Length];
+            System.Array.Copy(raw, 0, files, 0, raw.Length);
+            System.Array.Copy(transcripts, 0, files, raw.Length, transcripts.Length);
             if (files.Length == 0) return;
             System.Array.Sort(files, (a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
 
@@ -80,6 +127,9 @@ public sealed class SessionLogger : IDisposable
     public void Attach()
     {
         if (_control.Connection is null) return;
+        // Off / Transcript modes don't tee the raw VT stream — TranscriptCapture
+        // does its own writing driven by hook boundaries.
+        if (Path is null) return;
         try
         {
             _writer = new StreamWriter(Path, append: false, Encoding.UTF8);

@@ -4,7 +4,9 @@ public sealed record PlanTask(
     int LineNumber,
     string Text,
     bool IsDone,
-    int IndentLevel);
+    int IndentLevel,
+    bool IsInProgress = false,
+    bool IsPlanned = false);
 
 public sealed record PlanSection(
     int LineNumber,

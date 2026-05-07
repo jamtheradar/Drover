@@ -14,6 +14,33 @@
     <SolidColorBrush x:Key="Surface.SelectedInactive" Color="#2c3a48" />
     <SolidColorBrush x:Key="Text.Disabled"           Color="#666666" />
 
+    <!-- Kanban tokens — column/card backgrounds and gate badges. Extends the Surface
+         palette so the kanban board reads as part of the same dark surface system. -->
+    <SolidColorBrush x:Key="Kanban.ColumnBg"             Color="#252526" />
+    <SolidColorBrush x:Key="Kanban.ColumnHeaderBg"       Color="#2d2d2e" />
+    <SolidColorBrush x:Key="Kanban.CardBg"               Color="#2a2a2b" />
+    <SolidColorBrush x:Key="Kanban.CardBgHover"          Color="#333334" />
+    <SolidColorBrush x:Key="Kanban.CardBorder"           Color="#3a3a3b" />
+    <SolidColorBrush x:Key="Kanban.CardBorderInProgress" Color="#cca700" />
+    <SolidColorBrush x:Key="Kanban.CardBorderCompleted"  Color="#3a7a3a" />
+    <SolidColorBrush x:Key="Kanban.GateOk"               Color="#3a7a3a" />
+    <SolidColorBrush x:Key="Kanban.GateBlocked"          Color="#a83232" />
+    <SolidColorBrush x:Key="Kanban.GatePending"          Color="#7a7a7a" />
+    <SolidColorBrush x:Key="Kanban.DropTargetHighlight"  Color="#1f4a6a" />
+    <SolidColorBrush x:Key="Kanban.AgentRailBg"          Color="#1f1f20" />
+
+    <!-- Status edge-stripe colours — 3 px left edge of every card encodes status at a
+         glance, so the rest of the card body stays quiet. -->
+    <SolidColorBrush x:Key="Kanban.StripeBacklog"        Color="#5a5a5b" />
+    <SolidColorBrush x:Key="Kanban.StripePlanned"        Color="#3b82c4" />
+    <SolidColorBrush x:Key="Kanban.StripeInProgress"     Color="#cca700" />
+    <SolidColorBrush x:Key="Kanban.StripeCompleted"      Color="#3a7a3a" />
+
+    <!-- Column header count pill — separates count from label without competing with
+         the column body for attention. -->
+    <SolidColorBrush x:Key="Kanban.HeaderPillBg"         Color="#3a3a3b" />
+    <SolidColorBrush x:Key="Kanban.HeaderPillText"       Color="#d4d4d4" />
+
     <!-- ===================== Button ===================== -->
     <Style TargetType="{x:Type Button}">
         <Setter Property="Background" Value="{StaticResource Surface.Control}" />
@@ -382,14 +409,21 @@
                             SnapsToDevicePixels="True">
                         <Grid>
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIconColumn" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <ContentPresenter Grid.Column="0"
+                                              ContentSource="Icon"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Center"
+                                              Margin="0,0,8,0"
+                                              SnapsToDevicePixels="True" />
+                            <ContentPresenter Grid.Column="1"
                                               ContentSource="Header"
                                               VerticalAlignment="Center"
                                               RecognizesAccessKey="True" />
-                            <TextBlock Grid.Column="1"
+                            <TextBlock Grid.Column="2"
                                        Text="{TemplateBinding InputGestureText}"
                                        Foreground="{StaticResource Chrome.TextMuted}"
                                        Margin="20,0,0,0"

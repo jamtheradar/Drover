@@ -4,7 +4,10 @@ public sealed record TaskItem(
     int LineNumber,
     string Text,
     bool IsDone,
-    int IndentLevel);
+    int IndentLevel,
+    bool IsInProgress = false,
+    string RawLine = "",
+    bool IsPlanned = false);
 
 public sealed record TaskSection(
     int LineNumber,

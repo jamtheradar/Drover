@@ -96,7 +96,7 @@ public partial class CommandPalette : Window
             list.Add(new PaletteAction(
                 hookLabel,
                 "hooks",
-                () => _shell.InstallHookForTab(currentTab)));
+                () => _shell.InstallHookForProject(currentTab.Project)));
         }
 
         list.Add(new PaletteAction(

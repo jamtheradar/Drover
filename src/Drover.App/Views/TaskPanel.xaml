@@ -100,6 +100,12 @@
                                 ToolTip="Open selected list in default editor"
                                 Content="📝" />
                         <Button Style="{StaticResource TaskIconButton}"
+                                Command="{Binding BeginAddTaskCommand}"
+                                IsEnabled="{Binding CurrentTaskList.Exists, FallbackValue=False}"
+                                ToolTip="Add a new task to the selected list"
+                                Content="＋"
+                                FontSize="14" />
+                        <Button Style="{StaticResource TaskIconButton}"
                                 Command="{Binding ToggleTaskEditCommand}"
                                 ToolTip="Edit raw markdown · Ctrl+T toggles checkbox on the current line"
                                 Content="✏" />
@@ -160,6 +166,34 @@
                             ToolTip="Move this list back out of done/"
                             Visibility="{Binding SelectedTaskFileIsDone, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
+
+                <!-- Inline add-task composer. Hidden by default; revealed by the ＋
+                     button. Enter commits, Esc cancels. The new line is appended to
+                     the end of the active list as `- [ ] {title}` and the panel
+                     reloads from disk. -->
+                <DockPanel Margin="0,6,0,0"
+                           LastChildFill="True"
+                           Visibility="{Binding TaskComposerVisible, Converter={StaticResource BoolToVis}}">
+                    <Button DockPanel.Dock="Right"
+                            Content="Cancel"
+                            Padding="8,2"
+                            Margin="6,0,0,0"
+                            Command="{Binding CancelAddTaskCommand}" />
+                    <Button DockPanel.Dock="Right"
+                            Content="Add"
+                            Padding="8,2"
+                            Margin="6,0,0,0"
+                            Command="{Binding CommitAddTaskCommand}" />
+                    <TextBox x:Name="TaskComposerBox"
+                             Padding="6,3"
+                             Text="{Binding TaskComposerText, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}"
+                             Background="{StaticResource Surface.Input}"
+                             Foreground="{StaticResource Chrome.Text}"
+                             BorderBrush="{StaticResource Surface.InputBorder}"
+                             CaretBrush="{StaticResource Chrome.Text}"
+                             SelectionBrush="{StaticResource Chrome.Accent}"
+                             KeyDown="TaskComposerBox_KeyDown" />
+                </DockPanel>
             </StackPanel>
         </Border>
 
@@ -234,7 +268,27 @@
                             <DataTemplate DataType="{x:Type m:TaskItem}">
                                 <Button Style="{StaticResource TaskItemRowButton}"
                                         Command="{Binding DataContext.SendTaskItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}">
+                                        CommandParameter="{Binding}"
+                                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                    <Button.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Send as prompt"
+                                                      Command="{Binding PlacementTarget.Tag.SendTaskItemCommand,
+                                                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext,
+                                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <Separator />
+                                            <MenuItem Header="Promote (interrogate)"
+                                                      ToolTip="Turn this task into a fully-formed spec under specs/ via guided questions."
+                                                      Command="{Binding PlacementTarget.Tag.PromoteInterrogateCommand,
+                                                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext,
+                                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <MenuItem Header="Promote (thin)"
+                                                      IsEnabled="False"
+                                                      ToolTip="Coming in §3.10" />
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
                                     <DockPanel LastChildFill="True">
                                         <TextBlock DockPanel.Dock="Left" Margin="6,0,8,0"
                                                    Foreground="{StaticResource Chrome.TextMuted}">

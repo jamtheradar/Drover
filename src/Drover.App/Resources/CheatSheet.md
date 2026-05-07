@@ -31,6 +31,7 @@ Quick reference for everyday use. Press `Esc` to close · type in the search box
 - `Ctrl+Shift+F` — search across all session logs
 - `Alt+P` — toggle plan panel
 - `Ctrl+Shift+T` — toggle tasks panel
+- `Alt+K` — toggle kanban board (drag local tasks · live TodoWrite mirror · agents catalog)
 - `Ctrl+,` — settings
 - `Ctrl+Shift+\`` — bring Drover to the foreground (global)
 - `F1` — this cheat sheet
@@ -191,7 +192,7 @@ Lifecycle events that trigger shell commands. Configure in `settings.json`:
 }
 ```
 
-Drover ships its own hook gateway on `127.0.0.1:17923` — install per-project from a tab's context menu (**Install Drover hook in project**).
+Drover ships its own hook gateway on `127.0.0.1:17923` — install per-project from the project sidebar's right-click menu under **Drover → Install Drover hook in project**.
 
 ---
 

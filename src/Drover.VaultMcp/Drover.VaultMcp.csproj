@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<LangVersion>latest</LangVersion>
+		<PlatformTarget>x64</PlatformTarget>
+		<SelfContained>false</SelfContained>
+		<RootNamespace>Drover.VaultMcp</RootNamespace>
+		<AssemblyName>Drover.VaultMcp</AssemblyName>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Drover.Vault.Core\Drover.Vault.Core.csproj" />
+	</ItemGroup>
+
+</Project>

@@ -37,6 +37,9 @@ public partial class SettingsWindow : Window
         SizeBox.ItemsSource = Sizes;
         SizeBox.SelectedItem = Sizes.Contains(store.Current.FontSize) ? store.Current.FontSize : 12;
 
+        PanelSizeBox.ItemsSource = Sizes;
+        PanelSizeBox.SelectedItem = Sizes.Contains(store.Current.PanelFontSize) ? store.Current.PanelFontSize : 12;
+
         ResumeBox.IsChecked = store.Current.ResumeOnRestore;
         TakeOverStatusLineBox.IsChecked = store.Current.TakeOverStatusLine;
         HooksEnabledBox.IsChecked = store.Current.HooksEnabled;
@@ -63,6 +66,21 @@ public partial class SettingsWindow : Window
 
         LogKeepBox.Text = store.Current.LogKeepCount.ToString(CultureInfo.InvariantCulture);
         LogBytesBox.Text = store.Current.LogByteBudgetMb.ToString(CultureInfo.InvariantCulture);
+
+        // Match the persisted enum value to the Tag on each ComboBoxItem; default to
+        // Transcript (the index-1 item) if the saved value is somehow stale.
+        var levelTag = store.Current.SessionLogLevel.ToString();
+        LogLevelBox.SelectedIndex = 1;
+        for (int i = 0; i < LogLevelBox.Items.Count; i++)
+        {
+            if (LogLevelBox.Items[i] is System.Windows.Controls.ComboBoxItem item
+                && item.Tag is string tag
+                && string.Equals(tag, levelTag, StringComparison.OrdinalIgnoreCase))
+            {
+                LogLevelBox.SelectedIndex = i;
+                break;
+            }
+        }
 
         ApplyShortcuts(store.Current.Shortcuts ?? new KeyboardShortcuts());
     }
@@ -122,6 +140,7 @@ public partial class SettingsWindow : Window
     {
         var fam = (FontBox.SelectedItem as string) ?? "Cascadia Code";
         var size = SizeBox.SelectedItem is int s ? s : 12;
+        var panelSize = PanelSizeBox.SelectedItem is int ps ? ps : 12;
         var resume = ResumeBox.IsChecked == true;
         var takeOverStatusLine = TakeOverStatusLineBox.IsChecked == true;
         var hooksEnabled = HooksEnabledBox.IsChecked == true;
@@ -140,6 +159,14 @@ public partial class SettingsWindow : Window
         var logBytes = int.TryParse(LogBytesBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var by) && by >= 0
             ? by : _store.Current.LogByteBudgetMb;
 
+        var logLevel = _store.Current.SessionLogLevel;
+        if (LogLevelBox.SelectedItem is System.Windows.Controls.ComboBoxItem chosen
+            && chosen.Tag is string chosenTag
+            && Enum.TryParse<SessionLogLevel>(chosenTag, ignoreCase: true, out var parsedLevel))
+        {
+            logLevel = parsedLevel;
+        }
+
         var shortcuts = new KeyboardShortcuts(
             CommandPalette: ScPalette.Text.Trim(),
             CycleTabForward: ScCycleNext.Text.Trim(),
@@ -150,11 +177,15 @@ public partial class SettingsWindow : Window
             Settings: ScSettings.Text.Trim(),
             TogglePlanPanel: ScPlanPanel.Text.Trim(),
             ToggleTaskPanel: ScTaskPanel.Text.Trim(),
-            ToggleFileExplorerPanel: ScFileExplorerPanel.Text.Trim());
+            ToggleFileExplorerPanel: ScFileExplorerPanel.Text.Trim(),
+            // Settings UI doesn't expose this binding yet; preserve whatever was loaded
+            // so saving the dialog doesn't silently reset the kanban hotkey.
+            ToggleKanbanPanel: _store.Current.Shortcuts?.ToggleKanbanPanel ?? "Alt+K");
         _store.Update(_store.Current with
         {
             FontFamily = fam,
             FontSize = size,
+            PanelFontSize = panelSize,
             ResumeOnRestore = resume,
             TakeOverStatusLine = takeOverStatusLine,
             HooksEnabled = hooksEnabled,
@@ -169,6 +200,7 @@ public partial class SettingsWindow : Window
             GlobalEnvVars = globalEnv,
             LogKeepCount = logKeep,
             LogByteBudgetMb = logBytes,
+            SessionLogLevel = logLevel,
         });
 
         WindowsStartupService.Apply(startWithWindows);
