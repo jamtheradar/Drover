@@ -195,7 +195,13 @@ public sealed class HooksInstaller
         }
     }
 
-    private void EnsureScript()
+    /// <summary>
+    /// Public for callers that share the forwarder script (e.g.
+    /// <see cref="CodexHooksInstaller"/>) but don't want the rest of the
+    /// Claude-scope install machinery. Writes the versioned script to
+    /// <see cref="ScriptPath"/> if it's missing or stale; no-op when current.
+    /// </summary>
+    public void EnsureScript()
     {
         var versionMarker = $"# drover-hook v{ScriptVersion}\n";
         var desired = versionMarker + ScriptContent;

@@ -46,6 +46,14 @@ public sealed class ProjectsCatalog
         Save();
     }
 
+    public void Move(int from, int to)
+    {
+        if (from < 0 || to < 0 || from == to) return;
+        if (from >= Projects.Count || to >= Projects.Count) return;
+        Projects.Move(from, to);
+        Save();
+    }
+
     private void Load()
     {
         try

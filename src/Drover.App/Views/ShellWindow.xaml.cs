@@ -15,6 +15,7 @@ public partial class ShellWindow : Window
     public ShellWindow()
     {
         InitializeComponent();
+        if (AppInfo.IsBeta) Title = "Drover (Beta)";
         WelcomeVersionText.Text = AppInfo.DisplayVersion;
         _globalHotkey = new GlobalHotkey(this);
         _globalHotkey.Pressed += (_, _) => BringSelfForward();
@@ -318,12 +319,13 @@ public partial class ShellWindow : Window
 
     private void RefreshTitle()
     {
-        if (DataContext is not ShellViewModel vm) { Title = "Drover"; return; }
-        if (IsActive) { Title = "Drover"; return; }
+        var brand = AppInfo.IsBeta ? "Drover (Beta)" : "Drover";
+        if (DataContext is not ShellViewModel vm) { Title = brand; return; }
+        if (IsActive) { Title = brand; return; }
         var waiting = 0;
         foreach (var t in vm.Tabs)
             if (t.Attention == AttentionState.Idle) waiting++;
-        Title = waiting > 0 ? $"Drover · {waiting} waiting" : "Drover";
+        Title = waiting > 0 ? $"{brand} · {waiting} waiting" : brand;
     }
 
     private void ApplyWindowPlacement()
@@ -404,6 +406,22 @@ public partial class ShellWindow : Window
     {
         var dlg = new AboutDialog { Owner = this };
         dlg.ShowDialog();
+    }
+
+    private void OpenLogs_Click(object sender, RoutedEventArgs e)
+    {
+        var path = AppLog.LogFilePath;
+        try
+        {
+            // Open Explorer with app.log selected when it exists; otherwise just
+            // open the logs folder (it may be empty on a fresh install).
+            if (System.IO.File.Exists(path))
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\"");
+            else
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    System.IO.Path.GetDirectoryName(path)!) { UseShellExecute = true });
+        }
+        catch { /* shell verb not registered — ignore */ }
     }
 
     public void ShowWhatsNewIfNeeded()
@@ -515,11 +533,28 @@ public partial class ShellWindow : Window
     {
         tab.AttentionChanged += OnTabAttention;
         tab.PermissionPrompted += OnTabPermissionPrompt;
+        tab.CodexHookSilent += OnCodexHookSilent;
     }
     private void Unsubscribe(TerminalTabViewModel tab)
     {
         tab.AttentionChanged -= OnTabAttention;
         tab.PermissionPrompted -= OnTabPermissionPrompt;
+        tab.CodexHookSilent -= OnCodexHookSilent;
+    }
+
+    /// <summary>
+    /// Surfaces a non-blocking toast when a Codex tab opens but no hook event
+    /// arrives within 10 s — almost always means the user forgot
+    /// <c>codex trust .</c> for the project. Doesn't flash the taskbar; this
+    /// is informational, not attention-grabbing.
+    /// </summary>
+    private void OnCodexHookSilent(object? sender, string message)
+    {
+        if (sender is not TerminalTabViewModel tab) return;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _toast?.NotifyInfo($"Codex hooks · {tab.Title}", message);
+        }));
     }
 
     /// <summary>
@@ -697,6 +732,13 @@ public partial class ShellWindow : Window
             vm.InstallHookForProject(project);
     }
 
+    private void InstallCodexHook_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is System.Windows.Controls.MenuItem mi && mi.Tag is Models.ProjectDefinition project)
+            vm.InstallCodexHookForProject(project);
+    }
+
     private void OpenHooksLog_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is ShellViewModel vm) vm.OpenHooksLog();
@@ -719,6 +761,89 @@ public partial class ShellWindow : Window
         foreach (var project in dlg.Result)
             vm.AddProject(project);
         vm.StatusText = $"imported {dlg.Result.Count} project{(dlg.Result.Count == 1 ? "" : "s")}";
+    }
+
+    // --- Project list drag-to-reorder -----------------------------------
+    // Live reorder while dragging a project row up/down the sidebar. We don't
+    // capture the mouse or mark events handled below the drag threshold, so a
+    // plain click still fires OpenProjectCommand and the chevron/context menu
+    // keep working. The catalog is the source of truth — MoveProject persists
+    // the new order and OnCatalogChanged mirrors it into ProjectItems.
+    private const double ProjectDragThreshold = 6.0;
+    private System.Windows.Point _projectDragStart;
+    private Models.ProjectDefinition? _projectDragItem;
+    private bool _projectDragging;
+
+    private void ProjectsList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _projectDragItem = ResolveProjectAt(e.OriginalSource);
+        _projectDragStart = e.GetPosition(this);
+        _projectDragging = false;
+    }
+
+    private void ProjectsList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_projectDragItem is null || e.LeftButton != MouseButtonState.Pressed) return;
+        if (DataContext is not ShellViewModel vm) return;
+
+        var pos = e.GetPosition(this);
+        if (!_projectDragging)
+        {
+            if (System.Math.Abs(pos.X - _projectDragStart.X) < ProjectDragThreshold
+                && System.Math.Abs(pos.Y - _projectDragStart.Y) < ProjectDragThreshold)
+                return;
+            _projectDragging = true;
+        }
+
+        // Don't trust e.OriginalSource: the pressed row's Button captures the
+        // mouse, so OriginalSource stays pinned to the dragged item for the whole
+        // drag. Hit-test at the live cursor position to find the row underneath.
+        var over = ResolveProjectAtPoint(e.GetPosition(ProjectsList));
+        if (over is null || ReferenceEquals(over, _projectDragItem)) return;
+
+        int from = vm.Projects.IndexOf(_projectDragItem);
+        int to = vm.Projects.IndexOf(over);
+        if (from < 0 || to < 0 || from == to) return;
+        vm.MoveProject(from, to);
+    }
+
+    private void ProjectsList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        // If we actually dragged, swallow the up so the row's Button doesn't
+        // treat it as a click and fire OpenProjectCommand (launching a tab).
+        if (_projectDragging)
+        {
+            e.Handled = true;
+            // The pressed row's Button captured the mouse on ButtonDown. By
+            // swallowing the tunneling up above, the Button never runs its
+            // mouse-up logic, so it keeps capture and its IsPressed visual
+            // state sticks — the row reads as "still selected". Release the
+            // capture ourselves so the pressed highlight clears.
+            Mouse.Captured?.ReleaseMouseCapture();
+        }
+        _projectDragItem = null;
+        _projectDragging = false;
+    }
+
+    private static Models.ProjectDefinition? ResolveProjectAt(object? source)
+    {
+        var node = source as DependencyObject;
+        while (node is not null)
+        {
+            if (node is FrameworkElement fe && fe.DataContext is ProjectListItem item)
+                return item.Project;
+            node = System.Windows.Media.VisualTreeHelper.GetParent(node);
+        }
+        return null;
+    }
+
+    // Hit-test variant for mid-drag use, where the captured Button makes
+    // e.OriginalSource unreliable. Walks up from whatever visual sits under the
+    // cursor to the owning project row.
+    private Models.ProjectDefinition? ResolveProjectAtPoint(System.Windows.Point point)
+    {
+        var hit = System.Windows.Media.VisualTreeHelper.HitTest(ProjectsList, point);
+        return hit is null ? null : ResolveProjectAt(hit.VisualHit);
     }
 
     private void RemoveProject_Click(object sender, RoutedEventArgs e)
@@ -757,30 +882,38 @@ public partial class ShellWindow : Window
         var initialized = templates?.IsInitialized(project.Path) ?? false;
         var hooks = (App.Current as App)?.Services.GetService(typeof(Services.HooksInstaller)) as Services.HooksInstaller;
         var hookInstalled = hooks?.IsInstalledForProject(project.Path) ?? false;
+        var codexHooks = (App.Current as App)?.Services.GetService(typeof(Services.CodexHooksInstaller)) as Services.CodexHooksInstaller;
+        var codexHookInstalled = codexHooks?.IsInstalledForProject(project.Path) ?? false;
+        var isCodex = project.Kind == Models.ProjectKind.Codex;
+        var isGemini = project.Kind == Models.ProjectKind.Gemini;
 
         foreach (var child in cm.Items)
         {
-            if (child is not System.Windows.Controls.MenuItem topItem) continue;
-            if (topItem.Header is not string header || header != "Drover") continue;
-            foreach (var sub in topItem.Items)
+            if (child is not System.Windows.Controls.MenuItem mi) continue;
+            if (mi.Name == "InstallHookProjectMenuItem")
             {
-                if (sub is not System.Windows.Controls.MenuItem mi) continue;
-                if (mi.Name == "InstallHookProjectMenuItem")
-                {
-                    mi.Header = hookInstalled
-                        ? "Reinstall Drover hook in project"
-                        : "Install Drover hook in project";
-                    continue;
-                }
-                if (mi.Header is not string h) continue;
-                mi.Visibility = h switch
-                {
-                    "Initialize specs" => initialized ? Visibility.Collapsed : Visibility.Visible,
-                    "Enhance spec template" => initialized ? Visibility.Visible : Visibility.Collapsed,
-                    "Open .drover folder" => initialized ? Visibility.Visible : Visibility.Collapsed,
-                    _ => mi.Visibility,
-                };
+                mi.Visibility = (isCodex || isGemini) ? Visibility.Collapsed : Visibility.Visible;
+                mi.Header = hookInstalled
+                    ? "Reinstall Drover hook in project"
+                    : "Install Drover hook in project";
+                continue;
             }
+            if (mi.Name == "InstallCodexHookProjectMenuItem")
+            {
+                mi.Visibility = isCodex ? Visibility.Visible : Visibility.Collapsed;
+                mi.Header = codexHookInstalled
+                    ? "Reinstall Codex hooks"
+                    : "Install Codex hooks";
+                continue;
+            }
+            if (mi.Header is not string h) continue;
+            mi.Visibility = h switch
+            {
+                "Initialize specs" => initialized ? Visibility.Collapsed : Visibility.Visible,
+                "Enhance spec template" => initialized ? Visibility.Visible : Visibility.Collapsed,
+                "Open .drover folder" => initialized ? Visibility.Visible : Visibility.Collapsed,
+                _ => mi.Visibility,
+            };
         }
     }
 
@@ -851,7 +984,7 @@ public partial class ShellWindow : Window
 
         // Focus an existing tab for this project if one is open; only spawn a new
         // terminal when there's nothing to focus. Without this, every panel-shortcut
-        // click would launch another Claude session.
+        // click would launch another agent session.
         TerminalTabViewModel? existing = null;
         foreach (var t in vm.Tabs)
         {

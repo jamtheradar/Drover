@@ -5,7 +5,13 @@ namespace Drover.App.Services;
 public static class AppInfo
 {
     public static string Version { get; } = ResolveVersion();
-    public static string DisplayVersion => $"v{Version}";
+    public static string DisplayVersion => IsBeta ? $"v{Version} (Beta)" : $"v{Version}";
+
+#if BETA
+    public const bool IsBeta = true;
+#else
+    public const bool IsBeta = false;
+#endif
 
     private static string ResolveVersion()
     {

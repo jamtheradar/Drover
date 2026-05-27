@@ -11,7 +11,10 @@ public enum MemoryScope { User, Project }
 
 /// <summary>
 /// Discovers Claude Code memory files: ~/.claude/CLAUDE.md, ~/.claude/memory/*.md (user scope),
-/// and any CLAUDE.md inside known project directories (project scope).
+/// and any CLAUDE.md inside known project directories (project scope). Also discovers Codex's
+/// AGENTS.md alongside CLAUDE.md — ~/.codex/AGENTS.md for user scope, AGENTS.md anywhere inside
+/// each project for project scope. Treated symmetrically; the Memory editor uses the actual
+/// filename so no per-agent UI logic is needed.
 /// </summary>
 public static class MemoryScanner
 {
@@ -56,18 +59,29 @@ public static class MemoryScanner
                         TryAdd(user, f, $"projects · {label}", MemoryScope.User);
                 }
             }
+
+            var codexRoot = Path.Combine(home, ".codex");
+            TryAdd(user, Path.Combine(codexRoot, "AGENTS.md"), "codex global", MemoryScope.User);
         }
 
         foreach (var path in projectPaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) continue;
             TryAdd(proj, Path.Combine(path, "CLAUDE.md"), path, MemoryScope.Project);
+            TryAdd(proj, Path.Combine(path, "AGENTS.md"), path, MemoryScope.Project);
             int found = 0;
             foreach (var f in EnumerateFilesSafe(path, "CLAUDE.md", MaxDepth))
             {
                 if (string.Equals(f, Path.Combine(path, "CLAUDE.md"), StringComparison.OrdinalIgnoreCase)) continue;
                 TryAdd(proj, f, RelativeFrom(path, f), MemoryScope.Project);
                 if (++found >= MaxFilesPerProject) break;
+            }
+            int foundAgents = 0;
+            foreach (var f in EnumerateFilesSafe(path, "AGENTS.md", MaxDepth))
+            {
+                if (string.Equals(f, Path.Combine(path, "AGENTS.md"), StringComparison.OrdinalIgnoreCase)) continue;
+                TryAdd(proj, f, RelativeFrom(path, f), MemoryScope.Project);
+                if (++foundAgents >= MaxFilesPerProject) break;
             }
         }
 

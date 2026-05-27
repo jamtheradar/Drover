@@ -24,6 +24,18 @@ public interface IPromptLibrary
     /// </summary>
     string Resolve(string name, string projectRoot,
                    IDictionary<string, string>? tokens = null);
+
+    /// <summary>
+    /// Agent-aware overload. For <paramref name="kind"/> = <see cref="HookAgentKind.Codex"/>,
+    /// callers that pass <c>name = "execute-spec"</c> get the Codex-flavoured
+    /// template (project override at
+    /// <c>.drover/prompts/prompt-execute-spec.codex.md</c>, embedded fallback
+    /// otherwise). All other names resolve identically across agents. Existing
+    /// single-name callers that don't care about agent kind keep using the
+    /// non-overloaded <see cref="Resolve(string,string,IDictionary{string,string}?)"/>.
+    /// </summary>
+    string Resolve(string name, string projectRoot, HookAgentKind kind,
+                   IDictionary<string, string>? tokens = null);
 }
 
 public sealed class PromptLibrary : IPromptLibrary
@@ -45,7 +57,20 @@ public sealed class PromptLibrary : IPromptLibrary
             ["enhance-template"] = "prompt-enhance-template.md",
             ["promote-interrogate"] = "prompt-promote-interrogate.md",
             ["execute-spec"] = "prompt-execute-spec.md",
+            ["execute-spec.codex"] = "prompt-execute-spec.codex.md",
             ["loop-batch"] = "prompt-loop-batch.md",
+        };
+
+    /// <summary>
+    /// Maps a public prompt name to its Codex variant when one exists. The
+    /// agent-aware resolver consults this before falling back to the default
+    /// table. Adding a new agent-flavoured prompt? Drop the template, register
+    /// it in <see cref="KnownPrompts"/>, and add an entry here.
+    /// </summary>
+    private static readonly System.Collections.Generic.Dictionary<string, string> CodexPromptMap =
+        new(System.StringComparer.OrdinalIgnoreCase)
+        {
+            ["execute-spec"] = "execute-spec.codex",
         };
 
     public PromptLibrary(TemplateService templates)
@@ -54,11 +79,25 @@ public sealed class PromptLibrary : IPromptLibrary
     }
 
     public string Resolve(string name, string projectRoot, IDictionary<string, string>? tokens = null)
+        => Resolve(name, projectRoot, HookAgentKind.Claude, tokens);
+
+    public string Resolve(string name, string projectRoot, HookAgentKind kind,
+                          IDictionary<string, string>? tokens = null)
     {
         if (string.IsNullOrEmpty(name))
             throw new System.ArgumentException("name is required", nameof(name));
 
-        if (!KnownPrompts.TryGetValue(name, out var fileName))
+        // Codex-flavoured variants live in a sibling table so existing callers
+        // and the project-override path keep using the canonical name. The
+        // forking happens at lookup time only.
+        var lookupName = name;
+        if (kind == HookAgentKind.Codex
+            && CodexPromptMap.TryGetValue(name, out var codexName))
+        {
+            lookupName = codexName;
+        }
+
+        if (!KnownPrompts.TryGetValue(lookupName, out var fileName))
             throw new System.ArgumentException($"Unknown prompt: '{name}'", nameof(name));
 
         var body = ReadProjectOverride(projectRoot, fileName) ?? ReadEmbedded(fileName);

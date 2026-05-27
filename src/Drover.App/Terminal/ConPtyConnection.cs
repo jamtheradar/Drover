@@ -37,6 +37,35 @@ public sealed class ConPtyConnection : ITerminalConnection, IDisposable
 
     private const int ReadBufferSize = 16 * 1024;
 
+    // Output coalescing: batch VT bytes before raising TerminalOutput so the
+    // TerminalControl renderer (which marshals to the UI thread on every raise)
+    // can't seize the Dispatcher faster than the chosen rate. Without this, a
+    // tab streaming Claude output floods the dispatcher queue and delays
+    // keyboard input events in every other open tab.
+    //
+    // Foreground = the currently selected tab; gets the smooth ~120 fps cap.
+    // Background = any other tab; throttled to ~30 fps so N busy background
+    // sessions can't collectively starve the focused tab's input echo. Set via
+    // IsForeground from ShellViewModel.OnSelectedTabChanged.
+    private const int ForegroundCoalesceMs = 8;     // ~120 flushes/sec
+    private const int BackgroundCoalesceMs = 33;    // ~30 flushes/sec
+    private const int CoalesceMaxChars = ReadBufferSize * 8; // 128 KB hard cap
+
+    // Read on the worker thread, written from the UI thread.
+    private volatile bool _isForeground = true;
+
+    /// <summary>
+    /// Whether this connection's owning tab is currently the selected/visible
+    /// one. Controls how aggressively the read loop coalesces output before
+    /// raising <see cref="TerminalOutput"/>. Defaults to true so tabs that
+    /// haven't been visited yet still render at full rate.
+    /// </summary>
+    public bool IsForeground
+    {
+        get => _isForeground;
+        set => _isForeground = value;
+    }
+
     private PseudoConsole? _console;
     private PseudoConsolePipe? _inputPipe;
     private PseudoConsolePipe? _outputPipe;
@@ -78,7 +107,11 @@ public sealed class ConPtyConnection : ITerminalConnection, IDisposable
         if (_outputStream is null) return;
 
         var buffer = new char[ReadBufferSize];
+        var coalesce = new System.Text.StringBuilder(ReadBufferSize * 4);
         using var reader = new StreamReader(_outputStream);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var lastFlushMs = 0L;
+
         while (true)
         {
             int read;
@@ -86,16 +119,40 @@ public sealed class ConPtyConnection : ITerminalConnection, IDisposable
             catch { break; }
             if (read == 0) break;
 
+            // Interceptors (AttentionMonitor, SessionLogger) run per-chunk on
+            // the worker thread — they observe the raw byte stream regardless
+            // of the renderer's coalescing window.
             var span = new Span<char>(buffer, 0, read);
             InterceptOutputToUITerminal?.Invoke(ref span);
-            if (span.Length == 0) continue;
+            if (span.Length > 0)
+                coalesce.Append(span);
 
-            try { TerminalOutput?.Invoke(this, new TerminalOutputEventArgs(span.ToString())); }
-            catch { /* renderer torn down — keep draining the pipe */ }
+            // Flush to the renderer (which seizes the UI thread) at most every
+            // CoalesceMs (foreground vs background — see IsForeground), or
+            // when the buffer grows too large to hold.
+            var nowMs = sw.ElapsedMilliseconds;
+            var coalesceMs = _isForeground ? ForegroundCoalesceMs : BackgroundCoalesceMs;
+            if (coalesce.Length > 0 &&
+                (nowMs - lastFlushMs >= coalesceMs || coalesce.Length >= CoalesceMaxChars))
+            {
+                FlushCoalesced(coalesce);
+                lastFlushMs = nowMs;
+            }
         }
+
+        if (coalesce.Length > 0)
+            FlushCoalesced(coalesce);
 
         try { TerminalOutput?.Invoke(this, new TerminalOutputEventArgs("\r\nSession Terminated\r\n")); }
         catch { }
+    }
+
+    private void FlushCoalesced(System.Text.StringBuilder sb)
+    {
+        var s = sb.ToString();
+        sb.Clear();
+        try { TerminalOutput?.Invoke(this, new TerminalOutputEventArgs(s)); }
+        catch { /* renderer torn down — keep draining the pipe */ }
     }
 
     /// <summary>

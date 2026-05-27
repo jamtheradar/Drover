@@ -88,15 +88,20 @@ public sealed class SessionStore
                     hooksUrl: _hooks.Url,
                     claudeExecutablePath: settings.ClaudeExecutablePath,
                     defaultClaudeModel: settings.DefaultClaudeModel,
+                    codexExecutablePath: settings.CodexExecutablePath,
                     globalEnvVars: settings.GlobalEnvVars,
                     logOptions: new SessionLogOptions(settings.LogKeepCount, settings.LogByteBudgetMb, settings.SessionLogLevel));
-                _hooks.Register(tab.SessionId, evt =>
+                var agentKind = HookAgentKinds.FromProjectKind(project.Kind);
+                if (agentKind is { } ak)
                 {
-                    tab.OnHookEvent(evt);
-                    _liveTodos.Ingest(evt);
-                    _buildTracker.Ingest(evt, tab.Project.Path);
-                });
-                _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
+                    _hooks.Register(tab.SessionId, ak, evt =>
+                    {
+                        tab.OnHookEvent(evt);
+                        _liveTodos.Ingest(evt);
+                        _buildTracker.Ingest(evt, tab.Project.Path);
+                    });
+                    _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
+                }
                 tab.StatusLineUpdated += _shell.OnTabStatusLineUpdated;
                 _shell.Tabs.Add(tab);
                 _shell.RefreshHooksStatusFor(project.Path);

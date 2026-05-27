@@ -55,6 +55,7 @@ public partial class App : Application
                 services.AddSingleton<ActivityLog>();
                 services.AddSingleton<HooksGateway>();
                 services.AddSingleton<HooksInstaller>();
+                services.AddSingleton<CodexHooksInstaller>();
                 services.AddSingleton<TokenStats>();
                 services.AddSingleton<GitStatusService>();
                 services.AddSingleton<LiveTodoStore>();
@@ -94,6 +95,7 @@ public partial class App : Application
         // tabs simply launch without DROVER_HOOKS_URL set, and OSC monitoring carries on.
         var gateway = _host.Services.GetRequiredService<HooksGateway>();
         var installer = _host.Services.GetRequiredService<HooksInstaller>();
+        var codexInstaller = _host.Services.GetRequiredService<CodexHooksInstaller>();
         var settingsStore = _host.Services.GetRequiredService<SettingsStore>();
 
         gateway.DebugLogging = settingsStore.Current.HooksDebugLogging;
@@ -110,6 +112,26 @@ public partial class App : Application
         // leak across projects we've never opened. User-added entries are left
         // alone.
         installer.TryUninstallGlobal();
+
+        // Codex hooks: opportunistic user-scope install when any project is
+        // configured as Codex. Codex's user-level hooks.json is the reliable
+        // path (project-scope requires `codex trust`), so writing once up
+        // front means every Codex tab gets event flow without extra clicks.
+        // Idempotent — re-runs rewrite Drover's entries and leave user ones.
+        try
+        {
+            var catalog = _host.Services.GetRequiredService<ProjectsCatalog>();
+            var hasCodex = false;
+            foreach (var p in catalog.Projects)
+            {
+                if (p.Kind == Models.ProjectKind.Codex) { hasCodex = true; break; }
+            }
+            if (hasCodex) codexInstaller.TryInstallUser();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("CodexHooks", "User-scope install on startup failed.", ex);
+        }
 
         settingsStore.Changed += (_, _) =>
         {

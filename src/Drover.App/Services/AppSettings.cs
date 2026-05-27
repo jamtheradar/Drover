@@ -49,6 +49,14 @@ public sealed record AppSettings(
     // Default --model flag appended to Claude tabs that don't carry a per-project
     // override. Empty = let Claude pick its default. Per-project Args/Model wins.
     string DefaultClaudeModel = "",
+    // Override for the `codex` executable used to launch Codex (OpenAI) tabs. When
+    // set, replaces the bare "codex" command in the pwsh wrapper. Leave blank to
+    // rely on PATH resolution. Per-project Command still takes precedence.
+    string CodexExecutablePath = "",
+    // Override for the `gemini` executable used to launch Gemini (Google) tabs. When
+    // set, replaces the bare "gemini" command in the pwsh wrapper. Leave blank to
+    // rely on PATH resolution. Per-project Command still takes precedence.
+    string GeminiExecutablePath = "",
     // KEY=VALUE pairs injected into every Claude/pwsh launch ahead of per-project
     // env. Useful for ANTHROPIC_API_KEY, NO_COLOR, proxy vars, etc.
     Dictionary<string, string>? GlobalEnvVars = null,
@@ -80,7 +88,10 @@ public sealed record AppSettings(
     // Base font size (in points) for non-terminal panels — Specs, Plan, Tasks,
     // File explorer, Kanban, Vault, and the dashboard. Applied as a layout-time
     // ScaleTransform so chrome scales with the text. 12 = 1.0× (default).
-    int PanelFontSize = 12);
+    int PanelFontSize = 12,
+    // Font size (in points) for the bottom status bar buttons, version, daily
+    // cost, panel-zoom, and right-side status text.
+    int StatusBarFontSize = 13);
 
 public sealed record KeyboardShortcuts(
     string CommandPalette = "Ctrl+Shift+P",

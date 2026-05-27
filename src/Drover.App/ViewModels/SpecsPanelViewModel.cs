@@ -73,6 +73,24 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
     [ObservableProperty] private LoopMode _defaultMode = LoopMode.Drover;
     [ObservableProperty] private string _runLoopButtonLabel = "Run loop (Drover)";
 
+    /// <summary>True when the active tab is a Codex project. Drives the
+    /// session-driven menu-item disable + tooltip, and the primary
+    /// Run-loop button disable when the project's default loop mode is
+    /// session-driven (carry-over from a Claude-era config).</summary>
+    [ObservableProperty] private bool _isCodexTab;
+    [ObservableProperty] private bool _isSessionModeDisabled;
+    [ObservableProperty] private string _sessionModeDisabledTooltip = string.Empty;
+
+    /// <summary>
+    /// Codex tab whose stored <c>default_loop_mode</c> is session-driven.
+    /// The primary Run-loop button is disabled in that combination — silently
+    /// falling back to Drover-driven would confuse the user about which mode
+    /// actually ran. The default-mode setter only writes the config the user
+    /// asked for; we don't auto-rewrite it on tab-load.
+    /// </summary>
+    [ObservableProperty] private bool _isPrimaryRunLoopBlocked;
+    [ObservableProperty] private string _primaryRunLoopTooltip = "Run loop using the project default mode";
+
     /// <summary>Live progress chrome — set by <see cref="OnLoopEvent"/> as
     /// the runner reports back. Empty when no loop is active.</summary>
     [ObservableProperty] private string _progressText = string.Empty;
@@ -103,9 +121,9 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         _watcher = new SpecWatcher();
         _watcher.Changed += (_, _) => _dispatcher.BeginInvoke(new System.Action(Reload));
 
-        RunLoopDefaultCommand = new RelayCommand(() => StartLoop(DefaultMode), () => CanRunLoop());
-        RunLoopDroverCommand = new RelayCommand(() => StartLoop(LoopMode.Drover), () => CanRunLoop());
-        RunLoopSessionCommand = new RelayCommand(() => StartLoop(LoopMode.Session), () => CanRunLoop());
+        RunLoopDefaultCommand = new RelayCommand(() => StartLoop(DefaultMode), () => CanRunLoop(DefaultMode));
+        RunLoopDroverCommand = new RelayCommand(() => StartLoop(LoopMode.Drover), () => CanRunLoop(LoopMode.Drover));
+        RunLoopSessionCommand = new RelayCommand(() => StartLoop(LoopMode.Session), () => CanRunLoop(LoopMode.Session));
         SetDefaultDroverCommand = new RelayCommand(() => SetDefault(LoopMode.Drover));
         SetDefaultSessionCommand = new RelayCommand(() => SetDefault(LoopMode.Session));
         StopLoopCommand = new RelayCommand(StopLoop, () => IsLoopRunning);
@@ -121,6 +139,11 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
             ProjectName = string.Empty;
             Specs.Clear();
             HasSpecs = false;
+            IsCodexTab = false;
+            IsSessionModeDisabled = false;
+            SessionModeDisabledTooltip = string.Empty;
+            IsPrimaryRunLoopBlocked = false;
+            PrimaryRunLoopTooltip = "Run loop using the project default mode";
             _watcher.Stop();
             UpdateButtonLabel();
             RaiseCommandStates();
@@ -130,10 +153,26 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         HasProject = true;
         ProjectName = tab.Project.Name ?? string.Empty;
         DefaultMode = _loopConfig.GetDefaultMode(tab.Project.Path);
+        IsCodexTab = tab.Project.Kind == ProjectKind.Codex;
+        var isNonClaudeCli = IsCodexTab || tab.Project.Kind == ProjectKind.Gemini;
+        IsSessionModeDisabled = isNonClaudeCli;
+        SessionModeDisabledTooltip = isNonClaudeCli
+            ? "Session-driven loop is Claude Code only."
+            : string.Empty;
+        UpdatePrimaryRunLoopState();
         UpdateButtonLabel();
         _watcher.Watch(tab.Project.Path);
         Reload();
         RaiseCommandStates();
+    }
+
+    private void UpdatePrimaryRunLoopState()
+    {
+        var blocked = IsCodexTab && DefaultMode == LoopMode.Session;
+        IsPrimaryRunLoopBlocked = blocked;
+        PrimaryRunLoopTooltip = blocked
+            ? "Session-driven loop is Claude Code only."
+            : "Run loop using the project default mode";
     }
 
     /// <summary>Re-scans the project's <c>specs/</c> folder. Called on tab
@@ -167,9 +206,13 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         RaiseCommandStates();
     }
 
-    private bool CanRunLoop()
+    private bool CanRunLoop(LoopMode mode)
     {
         if (_tab is null || IsLoopRunning) return false;
+        // Session-driven mode is Claude-only — disable the command for Codex
+        // tabs (drives the menu item's IsEnabled and the primary face button
+        // when the project's default mode is session-driven).
+        if (mode == LoopMode.Session && IsCodexTab) return false;
         foreach (var r in Specs) if (r.IsSelected) return true;
         return false;
     }
@@ -230,10 +273,11 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         var progress = new System.Progress<LoopEvent>(OnLoopEvent);
         var sessionAdapter = new TerminalTabSession(session);
 
+        var agentKind = HookAgentKinds.FromProjectKind(_tab.Project.Kind) ?? HookAgentKind.Claude;
         ILoopRunner runner = mode switch
         {
-            LoopMode.Session => new SessionDrivenLoopRunner(_prompts),
-            _                => new DroverDrivenLoopRunner(_prompts),
+            LoopMode.Session => new SessionDrivenLoopRunner(_prompts, agentKind),
+            _                => new DroverDrivenLoopRunner(_prompts, agentKind),
         };
 
         var token = _cts.Token;
@@ -310,5 +354,10 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
 
     partial void OnIsLoopRunningChanged(bool value) => RaiseCommandStates();
 
-    partial void OnDefaultModeChanged(LoopMode value) => UpdateButtonLabel();
+    partial void OnDefaultModeChanged(LoopMode value)
+    {
+        UpdateButtonLabel();
+        UpdatePrimaryRunLoopState();
+        RaiseCommandStates();
+    }
 }

@@ -34,6 +34,8 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" MinWidth="130" />
@@ -62,18 +64,30 @@
                                    ToolTip="Override for the `claude` command. Leave blank to rely on PATH." />
                         <Button    Grid.Row="3" Grid.Column="2" Content="Browse…" Padding="10,4" Margin="0,0,0,8" Click="BrowseClaude_Click" />
 
-                        <CheckBox  Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" x:Name="StartupBox"
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Codex executable"
+                                   Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,8" />
+                        <TextBox   Grid.Row="4" Grid.Column="1" x:Name="CodexPathBox" Padding="4" Margin="0,0,8,8"
+                                   ToolTip="Override for the `codex` command (OpenAI Codex CLI). Leave blank to rely on PATH." />
+                        <Button    Grid.Row="4" Grid.Column="2" Content="Browse…" Padding="10,4" Margin="0,0,0,8" Click="BrowseCodex_Click" />
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Gemini executable"
+                                   Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,8" />
+                        <TextBox   Grid.Row="5" Grid.Column="1" x:Name="GeminiPathBox" Padding="4" Margin="0,0,8,8"
+                                   ToolTip="Override for the `gemini` command (Google Gemini CLI). Leave blank to rely on PATH." />
+                        <Button    Grid.Row="5" Grid.Column="2" Content="Browse…" Padding="10,4" Margin="0,0,0,8" Click="BrowseGemini_Click" />
+
+                        <CheckBox  Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" x:Name="StartupBox"
                                    Content="Start Drover when I sign in to Windows"
                                    Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
-                        <TextBlock Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="Adds a per-user entry under HKCU\…\Run pointing at the current Drover.exe. No admin needed."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="20,0,0,12" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="Global environment (KEY=VALUE per line — applied before per-project env)"
                                    Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
-                        <TextBox   Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBox   Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="3"
                                    x:Name="GlobalEnvBox"
                                    MinHeight="80"
                                    AcceptsReturn="True"
@@ -81,13 +95,13 @@
                                    FontFamily="Cascadia Code, Consolas"
                                    Padding="4" Margin="0,0,0,8" />
 
-                        <Separator Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,4,0,8" />
+                        <Separator Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,4,0,8" />
 
-                        <TextBlock Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="11" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="Session log retention" Foreground="{StaticResource Chrome.Text}"
                                    FontWeight="SemiBold" Margin="0,0,0,6" />
 
-                        <Grid Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,4">
+                        <Grid Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" MinWidth="130" />
                                 <ColumnDefinition Width="80" />
@@ -104,19 +118,19 @@
                             <TextBox   Grid.Column="4" x:Name="LogBytesBox" Padding="4" />
                             <TextBlock Grid.Column="5" Text="MB" Foreground="{StaticResource Chrome.TextMuted}" VerticalAlignment="Center" Margin="6,0,0,0" />
                         </Grid>
-                        <TextBlock Grid.Row="11" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="0 disables the cap. Pruning runs each time a tab opens — older files are deleted first."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="12" Grid.Column="0" Text="Capture level"
+                        <TextBlock Grid.Row="14" Grid.Column="0" Text="Capture level"
                                    Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,4" />
-                        <ComboBox  Grid.Row="12" Grid.Column="1" Grid.ColumnSpan="2" x:Name="LogLevelBox" Margin="0,0,0,4" Padding="4">
+                        <ComboBox  Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" x:Name="LogLevelBox" Margin="0,0,0,4" Padding="4">
                             <ComboBoxItem Tag="Off" Content="Off — no log files" />
                             <ComboBoxItem Tag="Transcript" Content="Transcript — clean .transcript.md only (default)" />
                             <ComboBoxItem Tag="Full" Content="Full — raw VT trace + transcript" />
                         </ComboBox>
-                        <TextBlock Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="Transcript captures user/assistant pairs from CC's hook stream — readable, shareable. Full also writes the raw terminal trace; only useful for diagnosing rendering or replay issues."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="0,0,0,4" TextWrapping="Wrap" />
@@ -126,6 +140,7 @@
             <TabItem Header="Appearance">
                 <Grid Margin="8">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -151,14 +166,19 @@
                                ToolTip="Applies to Specs, Plan, Tasks, File explorer, Kanban, Vault and the dashboard. Scales chrome together with text." />
                     <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="PanelSizeBox" Margin="0,0,0,10" Padding="4" />
 
-                    <CheckBox Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Status bar size" Foreground="{StaticResource Chrome.Text}"
+                               VerticalAlignment="Center" Margin="0,0,12,10"
+                               ToolTip="Font size of the bottom status bar (version, daily cost, panel toggles, status text)." />
+                    <ComboBox  Grid.Row="3" Grid.Column="1" x:Name="StatusBarSizeBox" Margin="0,0,0,10" Padding="4" />
+
+                    <CheckBox Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
                               x:Name="ResumeBox"
                               Content="Resume Claude conversations on session restore (--resume)"
                               Foreground="{StaticResource Chrome.Text}"
                               Margin="0,8,0,0" />
 
-                    <TextBlock Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
-                               Text="Terminal font applies to new tabs. Panel size applies immediately."
+                    <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2"
+                               Text="Terminal font applies to new tabs. Panel and status bar sizes apply immediately."
                                Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                Margin="0,8,0,0" TextWrapping="Wrap" VerticalAlignment="Top" />
                 </Grid>

@@ -2,6 +2,13 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:s="clr-namespace:System;assembly=mscorlib">
 
+    <!-- Tab chrome defaults — fall back per project kind when ProjectDefinition.TabColor
+         is null. Codex picks the teal preset and Gemini picks Google blue so a fresh
+         project is visually distinguishable from a Claude tab at a glance; Claude /
+         ClaudeDirect / Pwsh continue to render with no project tint by design. -->
+    <SolidColorBrush x:Key="Tab.Default.Codex"        Color="#5BBFAA" />
+    <SolidColorBrush x:Key="Tab.Default.Gemini"       Color="#4285F4" />
+
     <!-- Surface tokens -->
     <SolidColorBrush x:Key="Surface.Control"         Color="#2d2d2e" />
     <SolidColorBrush x:Key="Surface.ControlHover"    Color="#3a3a3b" />

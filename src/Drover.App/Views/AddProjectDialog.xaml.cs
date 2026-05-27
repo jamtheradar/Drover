@@ -31,6 +31,8 @@ public partial class AddProjectDialog : Window
             PathBox.Text = seed.Path;
             if (seed.Kind == ProjectKind.Pwsh) KindPwsh.IsChecked = true;
             else if (seed.Kind == ProjectKind.ClaudeDirect) KindClaudeDirect.IsChecked = true;
+            else if (seed.Kind == ProjectKind.Codex) KindCodex.IsChecked = true;
+            else if (seed.Kind == ProjectKind.Gemini) KindGemini.IsChecked = true;
             CommandBox.Text = seed.Command ?? string.Empty;
             ArgsBox.Text = seed.Args ?? string.Empty;
             PlansFolderBox.Text = seed.PlansFolder ?? string.Empty;
@@ -38,13 +40,44 @@ public partial class AddProjectDialog : Window
             LaunchCommandBox.Text = seed.LaunchCommand ?? string.Empty;
             ModelBox.Text = seed.Model ?? string.Empty;
             if (seed.EnvVars is { Count: > 0 })
-                EnvBox.Text = string.Join(Environment.NewLine, seed.EnvVars.Select(kv => $"{kv.Key}={kv.Value}"));
+            {
+                IEnumerable<KeyValuePair<string, string>> envForBox = seed.EnvVars;
+                if (seed.Kind == ProjectKind.Codex
+                    && seed.EnvVars.TryGetValue("OPENAI_API_KEY", out var key)
+                    && !string.IsNullOrEmpty(key))
+                {
+                    ApiKeyBox.Password = key;
+                    envForBox = seed.EnvVars.Where(kv => kv.Key != "OPENAI_API_KEY");
+                }
+                else if (seed.Kind == ProjectKind.Gemini
+                    && seed.EnvVars.TryGetValue("GEMINI_API_KEY", out var gkey)
+                    && !string.IsNullOrEmpty(gkey))
+                {
+                    ApiKeyBox.Password = gkey;
+                    envForBox = seed.EnvVars.Where(kv => kv.Key != "GEMINI_API_KEY");
+                }
+                EnvBox.Text = string.Join(Environment.NewLine, envForBox.Select(kv => $"{kv.Key}={kv.Value}"));
+            }
         }
         Loaded += (_, _) =>
         {
             NameBox.Focus();
             UpdateTabColorSwatch();
+            UpdateApiKeyRowVisibility();
         };
+    }
+
+    private void Kind_Checked(object sender, RoutedEventArgs e)
+        => UpdateApiKeyRowVisibility();
+
+    private void UpdateApiKeyRowVisibility()
+    {
+        if (ApiKeyRow is null) return;
+        var isCodex = KindCodex.IsChecked == true;
+        var isGemini = KindGemini.IsChecked == true;
+        ApiKeyRow.Visibility = (isCodex || isGemini) ? Visibility.Visible : Visibility.Collapsed;
+        if (ApiKeyLabel is not null)
+            ApiKeyLabel.Text = isGemini ? "Gemini API key" : "OpenAI API key";
     }
 
     private void TabColorBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -57,6 +90,32 @@ public partial class AddProjectDialog : Window
 
     private void TabColorClear_Click(object sender, RoutedEventArgs e)
         => TabColorBox.Text = string.Empty;
+
+    private void TabColorPick_Click(object sender, RoutedEventArgs e)
+    {
+        using var dlg = new System.Windows.Forms.ColorDialog
+        {
+            AllowFullOpen = true,
+            FullOpen = true,
+            AnyColor = true,
+            SolidColorOnly = true,
+        };
+        var text = TabColorBox.Text?.Trim();
+        if (!string.IsNullOrEmpty(text))
+        {
+            try
+            {
+                var c = (Color)ColorConverter.ConvertFromString(text)!;
+                dlg.Color = System.Drawing.Color.FromArgb(c.R, c.G, c.B);
+            }
+            catch { }
+        }
+        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+        {
+            var c = dlg.Color;
+            TabColorBox.Text = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+        }
+    }
 
     private void UpdateTabColorSwatch()
     {
@@ -98,10 +157,30 @@ public partial class AddProjectDialog : Window
 
         var kind = KindPwsh.IsChecked == true ? ProjectKind.Pwsh
                  : KindClaudeDirect.IsChecked == true ? ProjectKind.ClaudeDirect
+                 : KindCodex.IsChecked == true ? ProjectKind.Codex
+                 : KindGemini.IsChecked == true ? ProjectKind.Gemini
                  : ProjectKind.Claude;
         var command = string.IsNullOrWhiteSpace(CommandBox.Text) ? null : CommandBox.Text.Trim();
         var args = string.IsNullOrWhiteSpace(ArgsBox.Text) ? null : ArgsBox.Text.Trim();
         var env = ParseEnv(EnvBox.Text);
+        if (kind == ProjectKind.Codex)
+        {
+            var apiKey = ApiKeyBox.Password;
+            if (!string.IsNullOrEmpty(apiKey))
+            {
+                env ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                env["OPENAI_API_KEY"] = apiKey;
+            }
+        }
+        else if (kind == ProjectKind.Gemini)
+        {
+            var apiKey = ApiKeyBox.Password;
+            if (!string.IsNullOrEmpty(apiKey))
+            {
+                env ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                env["GEMINI_API_KEY"] = apiKey;
+            }
+        }
         var plansFolder = string.IsNullOrWhiteSpace(PlansFolderBox.Text) ? null : PlansFolderBox.Text.Trim();
         var tabColor = string.IsNullOrWhiteSpace(TabColorBox.Text) ? null : TabColorBox.Text.Trim();
         var launchCommand = string.IsNullOrWhiteSpace(LaunchCommandBox.Text) ? null : LaunchCommandBox.Text.Trim();

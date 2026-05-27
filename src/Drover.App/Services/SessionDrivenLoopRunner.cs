@@ -12,7 +12,17 @@ namespace Drover.App.Services;
 /// </summary>
 public sealed class SessionDrivenLoopRunner : ILoopRunner
 {
+    /// <summary>
+    /// Sentinel <see cref="LoopEvent.Message"/> emitted (with <see cref="LoopEventKind.Errored"/>)
+    /// when a caller attempts session-driven mode against a Codex tab. Session-
+    /// driven mode relies on Claude-only Task subagents and <c>[loop:*]</c>
+    /// literal emission, so refusing is the correct behaviour; the panel
+    /// surfaces this verbatim as a toast.
+    /// </summary>
+    public const string ClaudeOnlyMessage = "session-driven loop is Claude Code only";
+
     private readonly IPromptLibrary _prompts;
+    private readonly HookAgentKind _agentKind;
 
     private static readonly Regex SpecStartToken = new(
         @"\[loop:spec-start\]\s+(\S+)", RegexOptions.Compiled);
@@ -23,9 +33,11 @@ public sealed class SessionDrivenLoopRunner : ILoopRunner
     private static readonly Regex DoneToken = new(
         @"\[loop:done\]", RegexOptions.Compiled);
 
-    public SessionDrivenLoopRunner(IPromptLibrary prompts)
+    public SessionDrivenLoopRunner(IPromptLibrary prompts,
+                                   HookAgentKind agentKind = HookAgentKind.Claude)
     {
         _prompts = prompts;
+        _agentKind = agentKind;
     }
 
     public async System.Threading.Tasks.Task RunAsync(
@@ -36,6 +48,17 @@ public sealed class SessionDrivenLoopRunner : ILoopRunner
         System.Threading.CancellationToken ct)
     {
         if (specs.Count == 0) return;
+
+        // Session-driven mode spawns Claude Task subagents and parses [loop:*]
+        // literals from session output — both Claude-only. Refuse cleanly so
+        // the caller can surface a toast; don't silently fall back to
+        // Drover-driven because that's a different observable mode.
+        if (_agentKind == HookAgentKind.Codex)
+        {
+            progress.Report(new LoopEvent(0, specs.Count, string.Empty,
+                LoopEventKind.Errored, ClaudeOnlyMessage));
+            return;
+        }
 
         var filenames = string.Join(", ", specs.Select(s => s.FileName));
         string prompt;

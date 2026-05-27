@@ -37,15 +37,24 @@ public sealed class TranscriptCapture : IDisposable
     private long _ccByteOffset;
 
     public string Path { get; }
+    public string? AgentDisplayName { get; }
+    public string? Model { get; }
 
-    public TranscriptCapture(string path) { Path = path; }
+    public TranscriptCapture(string path, string? agentDisplayName = null, string? model = null)
+    {
+        Path = path;
+        AgentDisplayName = agentDisplayName;
+        Model = model;
+    }
 
     public void Attach()
     {
         try
         {
             _writer = new StreamWriter(Path, append: false, Utf8NoBom) { AutoFlush = false };
-            _writer.WriteLine($"<!-- Drover transcript — {DateTime.Now:O} -->");
+            var agentLabel = string.IsNullOrWhiteSpace(AgentDisplayName) ? "—" : AgentDisplayName!;
+            var modelLabel = string.IsNullOrWhiteSpace(Model) ? "—" : Model!;
+            _writer.WriteLine($"<!-- Drover transcript — agent: {agentLabel} — model: {modelLabel} — started {DateTime.Now:O} -->");
             _writer.WriteLine();
             _writer.Flush();
         }

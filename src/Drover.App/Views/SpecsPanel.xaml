@@ -90,7 +90,8 @@
                     <Button x:Name="RunLoopFaceButton"
                             Content="{Binding RunLoopButtonLabel}"
                             Command="{Binding RunLoopDefaultCommand}"
-                            ToolTip="Run loop using the project default mode">
+                            ToolTip="{Binding PrimaryRunLoopTooltip}"
+                            ToolTipService.ShowOnDisabled="True">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource HeaderButton}">
                                 <Style.Triggers>
@@ -121,12 +122,27 @@
                                 <MenuItem Header="Run in Drover-driven mode"
                                           Command="{Binding RunLoopDroverCommand}" />
                                 <MenuItem Header="Run in session-driven mode"
-                                          Command="{Binding RunLoopSessionCommand}" />
+                                          Command="{Binding RunLoopSessionCommand}"
+                                          ToolTip="{Binding SessionModeDisabledTooltip}"
+                                          ToolTipService.ShowOnDisabled="True" />
                                 <Separator />
                                 <MenuItem Header="Set default to Drover-driven"
                                           Command="{Binding SetDefaultDroverCommand}" />
                                 <MenuItem Header="Set default to session-driven"
-                                          Command="{Binding SetDefaultSessionCommand}" />
+                                          Command="{Binding SetDefaultSessionCommand}"
+                                          ToolTip="{Binding SessionModeDisabledTooltip}"
+                                          ToolTipService.ShowOnDisabled="True">
+                                    <MenuItem.Style>
+                                        <Style TargetType="MenuItem">
+                                            <Setter Property="IsEnabled" Value="True" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSessionModeDisabled}" Value="True">
+                                                    <Setter Property="IsEnabled" Value="False" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </MenuItem.Style>
+                                </MenuItem>
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>

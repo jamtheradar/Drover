@@ -41,10 +41,11 @@ public sealed class TrayIconService : IDisposable
 
     public TrayIconService()
     {
-        _idle      = LoadIcon("drover-idle.ico");
-        _working   = LoadIcon("drover-working.ico");
-        _attention = LoadIcon("drover-attention.ico");
-        _inactive  = LoadIcon("drover-inactive.ico");
+        var suffix = AppInfo.IsBeta ? "-beta" : "";
+        _idle      = LoadIcon($"drover-idle{suffix}.ico");
+        _working   = LoadIcon($"drover-working{suffix}.ico");
+        _attention = LoadIcon($"drover-attention{suffix}.ico");
+        _inactive  = LoadIcon($"drover-inactive{suffix}.ico");
 
         var menu = new ContextMenuStrip();
         var showItem = new ToolStripMenuItem("Show Drover");
@@ -58,7 +59,7 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon = new NotifyIcon
         {
             Icon = _inactive,
-            Text = "Drover",
+            Text = AppInfo.IsBeta ? "Drover (Beta)" : "Drover",
             Visible = true,
             ContextMenuStrip = menu,
         };
@@ -169,12 +170,13 @@ public sealed class TrayIconService : IDisposable
             TrayState.Inactive  => _inactive,
             _                   => _idle,
         };
+        var brand = AppInfo.IsBeta ? "Drover (Beta)" : "Drover";
         _notifyIcon.Text = next switch
         {
-            TrayState.Working   => "Drover — working",
-            TrayState.Attention => "Drover — needs attention",
-            TrayState.Inactive  => "Drover — no sessions",
-            _                   => "Drover — idle",
+            TrayState.Working   => $"{brand} — working",
+            TrayState.Attention => $"{brand} — needs attention",
+            TrayState.Inactive  => $"{brand} — no sessions",
+            _                   => $"{brand} — idle",
         };
     }
 

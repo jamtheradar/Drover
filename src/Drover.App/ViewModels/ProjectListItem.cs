@@ -16,6 +16,7 @@ public sealed partial class ProjectListItem : ObservableObject
     [ObservableProperty] private string _gitText = string.Empty;
     [ObservableProperty] private bool _gitDirty;
     [ObservableProperty] private bool _gitHasRepo;
+    [ObservableProperty] private bool _vaultEnabled;
 
     public ProjectListItem(ProjectDefinition project)
     {

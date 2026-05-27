@@ -6,10 +6,11 @@ using System.Text.Json;
 namespace Drover.App.Services;
 
 /// <summary>
-/// Loopback HTTP listener that receives Claude Code hook events. Each tab launches
-/// with a unique session UUID + this listener's URL injected as env vars; Claude's
-/// configured hooks POST tool/permission/lifecycle events back to us tagged with
-/// the session id, which we route to the matching tab.
+/// Loopback HTTP listener that receives agent hook events (both Claude Code and
+/// Codex CLI). Each tab launches with a unique session UUID + this listener's URL
+/// injected as env vars; the agent's configured hooks POST tool/permission/
+/// lifecycle events back to us tagged with the session id, which we route to the
+/// matching tab.
 ///
 /// v0.2 scaffold: today this just receives and dispatches events. AttentionMonitor
 /// (OSC scraping) remains the primary signal in v0.1; this listener exists so the
@@ -19,6 +20,7 @@ public sealed class HooksGateway : IDisposable
 {
     private readonly HttpListener _listener = new();
     private readonly ConcurrentDictionary<string, Action<HookEvent>> _routes = new();
+    private readonly ConcurrentDictionary<string, HookAgentKind> _routeKinds = new();
     private readonly ConcurrentDictionary<string, Action<string>> _statusRoutes = new();
     private readonly object _logLock = new();
     private readonly object _statusLogLock = new();
@@ -67,10 +69,23 @@ public sealed class HooksGateway : IDisposable
         return false;
     }
 
-    public void Register(string sessionId, Action<HookEvent> handler)
-        => _routes[sessionId] = handler;
+    /// <summary>
+    /// Register a hook handler for a tab's session id. The tab declares its
+    /// <see cref="HookAgentKind"/> so the gateway can stamp every parsed
+    /// <see cref="HookEvent"/> before dispatch. Pwsh tabs must not register —
+    /// they don't run hooks.
+    /// </summary>
+    public void Register(string sessionId, HookAgentKind kind, Action<HookEvent> handler)
+    {
+        _routes[sessionId] = handler;
+        _routeKinds[sessionId] = kind;
+    }
 
-    public void Unregister(string sessionId) => _routes.TryRemove(sessionId, out _);
+    public void Unregister(string sessionId)
+    {
+        _routes.TryRemove(sessionId, out _);
+        _routeKinds.TryRemove(sessionId, out _);
+    }
 
     /// <summary>
     /// Registers a handler for Claude Code statusLine pushes for the given session.
@@ -118,6 +133,20 @@ public sealed class HooksGateway : IDisposable
                 return;
             }
 
+            // Resolve the registering tab's agent kind by session id. Unknown
+            // session → drop the event (same as the previous unrouted behaviour)
+            // and log a warning so a misconfigured hook install is diagnosable.
+            if (string.IsNullOrEmpty(sessionId) || !_routeKinds.TryGetValue(sessionId, out var agentKind))
+            {
+                AppLog.Warn("HooksGateway",
+                    $"Dropped hook event from unregistered session id '{sessionId}'. " +
+                    "Most likely a stale forwarder POSTed after the tab closed, or a " +
+                    "session id mismatch between the hook command and the tab launch env.");
+                ctx.Response.StatusCode = 204;
+                ctx.Response.Close();
+                return;
+            }
+
             HookEvent? evt = null;
             try
             {
@@ -126,7 +155,9 @@ public sealed class HooksGateway : IDisposable
                 // Claude Code's hook envelope keys the event name as
                 // `hook_event_name` and the tool as `tool_name`. Older shape
                 // (`type`/`tool`) is kept as a fallback so anything posting in
-                // either form still routes — see hooks.jsonl samples.
+                // either form still routes — see hooks.jsonl samples. Codex
+                // uses the same snake_case names plus turn_id / tool_use_id /
+                // transcript_path / source / last_assistant_message.
                 string ReadStr(params string[] names)
                 {
                     foreach (var n in names)
@@ -136,26 +167,51 @@ public sealed class HooksGateway : IDisposable
                     }
                     return "";
                 }
+                string? ReadRawObject(string name)
+                {
+                    if (root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Object)
+                        return v.GetRawText();
+                    return null;
+                }
                 var typeName = ReadStr("hook_event_name", "type");
                 var toolName = ReadStr("tool_name", "tool");
                 var phaseName = ReadStr("phase");
                 var message = ReadStr("message");
+                var turnId = ReadStr("turn_id");
+                var toolUseId = ReadStr("tool_use_id");
+                var transcriptPath = ReadStr("transcript_path");
+                var sessionStartSource = ReadStr("source");
+                var lastAssistantMessage = ReadStr("last_assistant_message");
+                var model = ReadStr("model");
+                var toolInput = ReadRawObject("tool_input");
+                var toolResponse = ReadRawObject("tool_response");
                 evt = new HookEvent(
                     sessionId,
                     typeName,
                     string.IsNullOrEmpty(toolName) ? null : toolName,
                     string.IsNullOrEmpty(phaseName) ? null : phaseName,
                     string.IsNullOrEmpty(message) ? null : message,
-                    body);
+                    body)
+                {
+                    Kind = agentKind,
+                    TurnId = string.IsNullOrEmpty(turnId) ? null : turnId,
+                    ToolUseId = string.IsNullOrEmpty(toolUseId) ? null : toolUseId,
+                    ToolInput = toolInput,
+                    ToolResponse = toolResponse,
+                    TranscriptPath = string.IsNullOrEmpty(transcriptPath) ? null : transcriptPath,
+                    SessionStartSource = string.IsNullOrEmpty(sessionStartSource) ? null : sessionStartSource,
+                    LastAssistantMessage = string.IsNullOrEmpty(lastAssistantMessage) ? null : lastAssistantMessage,
+                    Model = string.IsNullOrEmpty(model) ? null : model,
+                };
             }
             catch
             {
-                evt = new HookEvent(sessionId, "raw", null, null, null, body);
+                evt = new HookEvent(sessionId, "raw", null, null, null, body) { Kind = agentKind };
             }
 
             AppendLog(evt, ctx.Request.RemoteEndPoint?.ToString());
 
-            if (!string.IsNullOrEmpty(sessionId) && _routes.TryGetValue(sessionId, out var handler))
+            if (_routes.TryGetValue(sessionId, out var handler))
             {
                 try { handler(evt); } catch { /* per-tab handler must not kill the gateway */ }
             }
@@ -213,9 +269,13 @@ public sealed class HooksGateway : IDisposable
             ts = DateTime.UtcNow.ToString("o"),
             remote,
             session = evt.SessionId,
+            kind = evt.Kind.ToString(),
             type = evt.Type,
             tool = evt.Tool,
             phase = evt.Phase,
+            turn_id = evt.TurnId,
+            tool_use_id = evt.ToolUseId,
+            transcript_path = evt.TranscriptPath,
             routed = !string.IsNullOrEmpty(evt.SessionId) && _routes.ContainsKey(evt.SessionId),
             body = evt.RawBody,
         });
@@ -246,7 +306,43 @@ public sealed class HooksGateway : IDisposable
         try { if (_listener.IsListening) _listener.Stop(); } catch { }
         try { _listener.Close(); } catch { }
         _routes.Clear();
+        _routeKinds.Clear();
     }
 }
 
-public sealed record HookEvent(string SessionId, string Type, string? Tool, string? Phase, string? Message, string RawBody);
+/// <summary>
+/// Parsed hook envelope routed by <see cref="HooksGateway"/>. Carries fields from
+/// both Claude Code and Codex CLI payloads; agent-specific fields are nullable
+/// and set only when present on the wire. <see cref="Kind"/> is stamped by the
+/// gateway from the registering tab's <see cref="HookAgentKind"/>; downstream
+/// consumers branch on it where Claude/Codex behaviour differs.
+/// </summary>
+public sealed record HookEvent(string SessionId, string Type, string? Tool, string? Phase, string? Message, string RawBody)
+{
+    /// <summary>Which agent produced this event. Stamped at dispatch from the route table.</summary>
+    public HookAgentKind Kind { get; init; } = HookAgentKind.Claude;
+
+    /// <summary>Codex turn id (<c>turn_id</c>). Null for Claude payloads.</summary>
+    public string? TurnId { get; init; }
+
+    /// <summary>Tool-use id (<c>tool_use_id</c>). Codex emits per tool event; Claude also carries it on tool events.</summary>
+    public string? ToolUseId { get; init; }
+
+    /// <summary>Raw JSON of the <c>tool_input</c> object as it arrived on the wire. Null when the payload omitted it.</summary>
+    public string? ToolInput { get; init; }
+
+    /// <summary>Raw JSON of the <c>tool_response</c> object as it arrived on the wire. Null when the payload omitted it.</summary>
+    public string? ToolResponse { get; init; }
+
+    /// <summary>Filesystem path to the agent's transcript JSONL (<c>transcript_path</c>). Stored verbatim; not consumed yet (Phase 2).</summary>
+    public string? TranscriptPath { get; init; }
+
+    /// <summary>Codex <c>SessionStart</c> source: <c>"startup" | "resume" | "clear"</c>. Null elsewhere.</summary>
+    public string? SessionStartSource { get; init; }
+
+    /// <summary>Codex <c>Stop</c> trailing assistant message (<c>last_assistant_message</c>). Null elsewhere.</summary>
+    public string? LastAssistantMessage { get; init; }
+
+    /// <summary>Active model identifier (<c>model</c>). Codex emits this on every event; Claude omits it.</summary>
+    public string? Model { get; init; }
+}

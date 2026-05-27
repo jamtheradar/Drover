@@ -11,9 +11,30 @@
 		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
 		<RootNamespace>Drover.App</RootNamespace>
 		<AssemblyName>Drover.App</AssemblyName>
-		<ApplicationIcon>Resources\Icons\drover-idle.ico</ApplicationIcon>
 		<Version>0.1.0</Version>
 		<StartupObject>Drover.App.Program</StartupObject>
+		<Configurations>Debug;Release;Beta</Configurations>
+	</PropertyGroup>
+
+	<!-- Beta build switch. Auto-on when Configuration=Beta (e.g. from a
+	     publish profile or VS Configuration Manager); can also be forced via
+	     `-p:Beta=true` on the command line. Drives a different ApplicationIcon
+	     and defines a BETA constant the C# code keys off. -->
+	<PropertyGroup>
+		<Beta Condition="'$(Beta)' == '' and '$(Configuration)' == 'Beta'">true</Beta>
+		<ApplicationIcon Condition="'$(Beta)' != 'true'">Resources\Icons\drover-idle.ico</ApplicationIcon>
+		<ApplicationIcon Condition="'$(Beta)' == 'true'">Resources\Icons\drover-idle-beta.ico</ApplicationIcon>
+		<DefineConstants Condition="'$(Beta)' == 'true'">$(DefineConstants);BETA</DefineConstants>
+	</PropertyGroup>
+
+	<!-- Treat the Beta configuration as a Release-like build so the SDK picks
+	     up Release defaults (optimisations on, no DEBUG constant). Without
+	     this, MSBuild treats unknown configurations as Debug. -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Beta'">
+		<Optimize>true</Optimize>
+		<DebugType>portable</DebugType>
+		<DebugSymbols>true</DebugSymbols>
+		<DefineConstants>$(DefineConstants);TRACE</DefineConstants>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -31,13 +52,13 @@
 
 	<ItemGroup>
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
 		<PackageReference Include="Microsoft.Terminal.Wpf" Version="1.24.260303001" />
 		<PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
 		<PackageReference Include="AvalonEdit" Version="6.3.1.120" />
-		<PackageReference Include="Microsoft.Windows.Console.ConPTY" Version="1.24.260303001" />
+		<PackageReference Include="Microsoft.Windows.Console.ConPTY" Version="1.24.260512001" />
 		<PackageReference Include="SharpVectors" Version="1.8.5" />
-		<PackageReference Include="Velopack" Version="0.0.1298" />
+		<PackageReference Include="Velopack" Version="1.0.1" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="$(MSBuildThisFileDirectory)..\..\References\Microsoft.Terminal.Control.dll">
@@ -55,6 +76,10 @@
 		<Resource Include="Resources\Icons\drover-working.ico" />
 		<Resource Include="Resources\Icons\drover-attention.ico" />
 		<Resource Include="Resources\Icons\drover-inactive.ico" />
+		<Resource Include="Resources\Icons\drover-idle-beta.ico" Condition="'$(Beta)' == 'true'" />
+		<Resource Include="Resources\Icons\drover-working-beta.ico" Condition="'$(Beta)' == 'true'" />
+		<Resource Include="Resources\Icons\drover-attention-beta.ico" Condition="'$(Beta)' == 'true'" />
+		<Resource Include="Resources\Icons\drover-inactive-beta.ico" Condition="'$(Beta)' == 'true'" />
 		<Resource Include="Resources\CheatSheet.md" />
 		<Resource Include="Resources\WhatsNew.md" />
 		<Resource Include="Resources\FileIcons\*.svg" />
@@ -69,20 +94,10 @@
 		<!-- Build dependency only — the MCP exe is launched as a separate process by Claude
 		     Code via .mcp.json (spec 0006); we never link against it. The post-build target
 		     below copies the runtime files into vaultmcp/ next to Drover.App.exe. -->
-		<ProjectReference Include="..\Drover.VaultMcp\Drover.VaultMcp.csproj"
-		                  ReferenceOutputAssembly="false"
-		                  SkipGetTargetFrameworkProperties="true"
-		                  PrivateAssets="all"
-		                  ExcludeAssets="all"
-		                  Private="false" />
+		<ProjectReference Include="..\Drover.VaultMcp\Drover.VaultMcp.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" PrivateAssets="all" ExcludeAssets="all" Private="false" />
 		<!-- Build dependency only — the indexer is launched as a separate process by
 		     SkillsRepoCatalog.RefreshAsync. Same shape as VaultMcp above. -->
-		<ProjectReference Include="..\Drover.SkillsIndexer\Drover.SkillsIndexer.csproj"
-		                  ReferenceOutputAssembly="false"
-		                  SkipGetTargetFrameworkProperties="true"
-		                  PrivateAssets="all"
-		                  ExcludeAssets="all"
-		                  Private="false" />
+		<ProjectReference Include="..\Drover.SkillsIndexer\Drover.SkillsIndexer.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" PrivateAssets="all" ExcludeAssets="all" Private="false" />
 	</ItemGroup>
 
 	<!-- Stage Drover.VaultMcp.exe + its runtime dependencies into a vaultmcp/ subfolder in
@@ -98,10 +113,7 @@
 			<VaultMcpFiles Include="$(VaultMcpOutDir)Drover.VaultMcp.runtimeconfig.json" />
 			<VaultMcpFiles Include="$(VaultMcpOutDir)Drover.Vault.Core.dll" />
 		</ItemGroup>
-		<Copy SourceFiles="@(VaultMcpFiles)"
-		      DestinationFolder="$(OutDir)vaultmcp\"
-		      SkipUnchangedFiles="true"
-		      Condition="Exists('%(FullPath)')" />
+		<Copy SourceFiles="@(VaultMcpFiles)" DestinationFolder="$(OutDir)vaultmcp\" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
 	</Target>
 
 	<!-- Stage drover-skills-indexer.exe + its runtime files alongside Drover.App.exe
@@ -115,10 +127,7 @@
 			<SkillsIndexerFiles Include="$(SkillsIndexerOutDir)drover-skills-indexer.dll" />
 			<SkillsIndexerFiles Include="$(SkillsIndexerOutDir)drover-skills-indexer.runtimeconfig.json" />
 		</ItemGroup>
-		<Copy SourceFiles="@(SkillsIndexerFiles)"
-		      DestinationFolder="$(OutDir)"
-		      SkipUnchangedFiles="true"
-		      Condition="Exists('%(FullPath)')" />
+		<Copy SourceFiles="@(SkillsIndexerFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
 	</Target>
 
 	<!-- Publish-time equivalent: invoke Publish on Drover.VaultMcp into a known
@@ -128,29 +137,21 @@
 		<PropertyGroup>
 			<VaultMcpPublishDir>$(MSBuildThisFileDirectory)..\Drover.VaultMcp\bin\$(Configuration)\net10.0\publish\</VaultMcpPublishDir>
 		</PropertyGroup>
-		<MSBuild Projects="..\Drover.VaultMcp\Drover.VaultMcp.csproj"
-		         Targets="Publish"
-		         Properties="Configuration=$(Configuration);TargetFramework=net10.0;PublishDir=$(VaultMcpPublishDir)" />
+		<MSBuild Projects="..\Drover.VaultMcp\Drover.VaultMcp.csproj" Targets="Publish" Properties="Configuration=$(Configuration);TargetFramework=net10.0;PublishDir=$(VaultMcpPublishDir)" />
 		<ItemGroup>
 			<VaultMcpPublishedFiles Include="$(VaultMcpPublishDir)**\*" />
 		</ItemGroup>
-		<Copy SourceFiles="@(VaultMcpPublishedFiles)"
-		      DestinationFolder="$(PublishDir)vaultmcp\%(RecursiveDir)"
-		      SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(VaultMcpPublishedFiles)" DestinationFolder="$(PublishDir)vaultmcp\%(RecursiveDir)" SkipUnchangedFiles="true" />
 	</Target>
 
 	<Target Name="CopySkillsIndexerToPublish" AfterTargets="Publish">
 		<PropertyGroup>
 			<SkillsIndexerPublishDir>$(MSBuildThisFileDirectory)..\Drover.SkillsIndexer\bin\$(Configuration)\net10.0\publish\</SkillsIndexerPublishDir>
 		</PropertyGroup>
-		<MSBuild Projects="..\Drover.SkillsIndexer\Drover.SkillsIndexer.csproj"
-		         Targets="Publish"
-		         Properties="Configuration=$(Configuration);TargetFramework=net10.0;PublishDir=$(SkillsIndexerPublishDir)" />
+		<MSBuild Projects="..\Drover.SkillsIndexer\Drover.SkillsIndexer.csproj" Targets="Publish" Properties="Configuration=$(Configuration);TargetFramework=net10.0;PublishDir=$(SkillsIndexerPublishDir)" />
 		<ItemGroup>
 			<SkillsIndexerPublishedFiles Include="$(SkillsIndexerPublishDir)**\*" />
 		</ItemGroup>
-		<Copy SourceFiles="@(SkillsIndexerPublishedFiles)"
-		      DestinationFolder="$(PublishDir)%(RecursiveDir)"
-		      SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(SkillsIndexerPublishedFiles)" DestinationFolder="$(PublishDir)%(RecursiveDir)" SkipUnchangedFiles="true" />
 	</Target>
 </Project>

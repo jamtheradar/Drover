@@ -33,5 +33,17 @@ public enum ProjectKind
     /// directory and environment (DROVER_SESSION_ID/HOOKS_URL, global+per-project env) are passed
     /// via the native API instead of shell builtins. Faster startup, no shell quirks; loses pwsh
     /// niceties (no shell after Claude exits — the tab shows "Session Terminated").</summary>
-    ClaudeDirect
+    ClaudeDirect,
+    /// <summary>Launch the OpenAI Codex CLI inside the standard pwsh wrapper. Mirrors the
+    /// <see cref="Claude"/> branch's env-var injection (DROVER_SESSION_ID / DROVER_HOOKS_URL) and
+    /// the per-project --model flag, but skips the Claude-only knobs (no --resume, no
+    /// --dangerously-skip-permissions, no CLAUDE_CODE_NO_FLICKER). The default command resolves
+    /// to <c>codex</c> on PATH unless <see cref="AppSettings.CodexExecutablePath"/> is set.</summary>
+    Codex,
+    /// <summary>Launch the Google Gemini CLI inside the standard pwsh wrapper. Mirrors the
+    /// <see cref="Codex"/> branch's env-var injection (DROVER_SESSION_ID / DROVER_HOOKS_URL) and
+    /// the per-project --model flag, but skips the Claude-only knobs (no --resume, no
+    /// --dangerously-skip-permissions, no CLAUDE_CODE_NO_FLICKER). The default command resolves
+    /// to <c>gemini</c> on PATH unless <see cref="AppSettings.GeminiExecutablePath"/> is set.</summary>
+    Gemini
 }

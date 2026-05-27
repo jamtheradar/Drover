@@ -153,8 +153,10 @@ public sealed class LoopConfigService : ILoopConfigService
 
     private static LoopMode Parse(string v) => v.Trim().ToLowerInvariant() switch
     {
-        "session" => LoopMode.Session,
-        _         => LoopMode.Drover,
+        // Accept both the canonical "session" and the longer "session-driven"
+        // form (spec 0012's test plan demonstrates users may hand-edit either).
+        "session" or "session-driven" => LoopMode.Session,
+        _                             => LoopMode.Drover,
     };
 
     private static string Serialise(LoopMode mode) => mode switch

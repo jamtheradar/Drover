@@ -57,7 +57,24 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     [ObservableProperty] private long _ccLinesRemoved;
     [ObservableProperty] private double _ccCostUsd;
     [ObservableProperty] private string _ccWorktreeBranch = string.Empty;
+    // Raw permission_mode value as pushed by CC: "default" | "plan" | "acceptEdits" | "bypassPermissions".
+    // Empty when the field hasn't been pushed (older CC, statusLine not wired). PermissionModeText
+    // is the friendly display form; the XAML binds to that and uses the raw value to colour the badge.
+    [ObservableProperty] private string _ccPermissionMode = string.Empty;
+    [ObservableProperty] private string _permissionModeText = string.Empty;
     [ObservableProperty] private DateTime _ccLastUpdateUtc;
+
+    // Codex pill state. Codex has no statusLine event, so these fields are
+    // driven directly by hook envelope contents on each event:
+    //  - _codexModel mirrors evt.Model (latest assistant turn's model id).
+    //  - _codexToolCountThisTurn increments on every Codex PreToolUse and
+    //    resets to 0 on UserPromptSubmit. Kept visible after Stop so the
+    //    user can see "the last turn used 7 tools" between prompts.
+    // CodexToolCountText is a one-shot string format ("3 tools" / "1 tool")
+    // so the XAML can bind without a multi-binding converter.
+    [ObservableProperty] private string? _codexModel;
+    [ObservableProperty] private int _codexToolCountThisTurn;
+    [ObservableProperty] private string _codexToolCountText = string.Empty;
 
     // Display-formatted derived strings — populated alongside the raw Cc* fields
     // from the same statusLine push, so the XAML can bind without value converters.
@@ -70,6 +87,12 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     private DateTime? _workingSince;
     private DispatcherTimer? _workingTimer;
     private DispatcherTimer? _toolDecayTimer;
+    // Codex-only: fires once 10s after the tab launches if no hook event has
+    // arrived yet. The user has almost certainly forgotten to run `codex trust .`
+    // for the project (project-scope hooks no-op silently otherwise). Cleared
+    // on the first hook event so a healthy install never raises a toast.
+    private DispatcherTimer? _codexHookWatchdog;
+    private bool _codexHookWatchdogFired;
 
     // True once a statusLine push has supplied an authoritative effort.level (or a
     // thinking.enabled=false). Polled transcript scanning won't overwrite EffortText
@@ -92,6 +115,8 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         bool dangerouslySkipPermissions = false,
         string? claudeExecutablePath = null,
         string? defaultClaudeModel = null,
+        string? codexExecutablePath = null,
+        string? geminiExecutablePath = null,
         System.Collections.Generic.IReadOnlyDictionary<string, string>? globalEnvVars = null,
         Drover.App.Services.SessionLogOptions? logOptions = null)
     {
@@ -104,6 +129,8 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         DangerouslySkipPermissions = dangerouslySkipPermissions;
         ClaudeExecutablePath = claudeExecutablePath;
         DefaultClaudeModel = defaultClaudeModel;
+        CodexExecutablePath = codexExecutablePath;
+        GeminiExecutablePath = geminiExecutablePath;
         GlobalEnvVars = globalEnvVars;
         LogOptions = logOptions;
         SessionId = Guid.NewGuid().ToString("N");
@@ -117,6 +144,8 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     public bool DangerouslySkipPermissions { get; }
     public string? ClaudeExecutablePath { get; }
     public string? DefaultClaudeModel { get; }
+    public string? CodexExecutablePath { get; }
+    public string? GeminiExecutablePath { get; }
     public System.Collections.Generic.IReadOnlyDictionary<string, string>? GlobalEnvVars { get; }
     public Drover.App.Services.SessionLogOptions? LogOptions { get; }
     public string SessionId { get; }
@@ -124,24 +153,80 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Frozen <see cref="SolidColorBrush"/> derived from <see cref="ProjectDefinition.TabColor"/>,
     /// or null when no per-project colour is set. The tab header style binds to this and falls
-    /// back to the chrome default when null. Returning null on parse failure keeps a typo'd hex
-    /// from breaking the UI — the tab just renders with the default chrome.
+    /// back to the chrome default when null. For Codex projects with no explicit colour we
+    /// substitute the <c>Tab.Default.Codex</c> palette brush so a fresh Codex tab is visually
+    /// distinct from a Claude tab; Claude / ClaudeDirect / Pwsh still return null (current
+    /// behaviour) per the spec — only Codex gets a kind-default.
     /// </summary>
     public Brush? TabColorBrush
     {
         get
         {
-            if (string.IsNullOrWhiteSpace(Project.TabColor)) return null;
-            try
+            if (!string.IsNullOrWhiteSpace(Project.TabColor))
             {
-                var color = (Color)ColorConverter.ConvertFromString(Project.TabColor)!;
-                var b = new SolidColorBrush(color);
-                b.Freeze();
-                return b;
+                try
+                {
+                    var color = (Color)ColorConverter.ConvertFromString(Project.TabColor)!;
+                    var b = new SolidColorBrush(color);
+                    b.Freeze();
+                    return b;
+                }
+                catch { /* fall through to per-kind default */ }
             }
-            catch { return null; }
+            if (Project.Kind == ProjectKind.Codex)
+            {
+                try
+                {
+                    var app = System.Windows.Application.Current;
+                    if (app?.TryFindResource("Tab.Default.Codex") is SolidColorBrush b) return b;
+                }
+                catch { }
+            }
+            if (Project.Kind == ProjectKind.Gemini)
+            {
+                try
+                {
+                    var app = System.Windows.Application.Current;
+                    if (app?.TryFindResource("Tab.Default.Gemini") is SolidColorBrush b) return b;
+                }
+                catch { }
+            }
+            return null;
         }
     }
+
+    /// <summary>
+    /// Friendly per-tab label for the agent powering the session ("Claude",
+    /// "Claude (direct)", "Codex", "PowerShell"). Single source of truth used
+    /// by the session-log preamble, the tab-badge tooltip, and any agent-aware
+    /// copy. Adding a new <see cref="ProjectKind"/>? Extend this switch and the
+    /// <see cref="AgentBadge"/> mapping in lockstep.
+    /// </summary>
+    public string AgentDisplayName => Project.Kind switch
+    {
+        ProjectKind.Claude        => "Claude",
+        ProjectKind.ClaudeDirect  => "Claude (direct)",
+        ProjectKind.Codex         => "Codex",
+        ProjectKind.Gemini        => "Gemini",
+        ProjectKind.Pwsh          => "PowerShell",
+        _                         => "Agent",
+    };
+
+    /// <summary>
+    /// Two-letter affordance shown in the tab header: <c>CC</c> Claude,
+    /// <c>CD</c> Claude (direct), <c>CX</c> Codex, <c>GC</c> Gemini, <c>PS</c> pwsh. Text rather
+    /// than icon by design — keeps the option open for future agents without
+    /// the icon-asset pipeline.
+    /// </summary>
+    public string AgentBadge => Project.Kind switch
+    {
+        ProjectKind.Claude        => "CC",
+        ProjectKind.ClaudeDirect  => "CD",
+        ProjectKind.Codex         => "CX",
+        ProjectKind.Gemini        => "GC",
+        ProjectKind.Pwsh          => "PS",
+        _                         => "??",
+    };
 
     // A non-null Theme is required for DroverTerminal to honor FontFamily/FontSize; if
     // left null it skips SetTheme entirely and falls back to the renderer's defaults.
@@ -172,6 +257,16 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// CLAUDE_CODE_NO_FLICKER, --model/--resume/--dangerously-skip-permissions, and the
     /// implicit "claude" command apply.</summary>
     private bool IsClaudeKind => Project.Kind is ProjectKind.Claude or ProjectKind.ClaudeDirect;
+
+    /// <summary>True for Codex tabs. Drives the simplified status-pill template branch
+    /// (model + activity dot + per-turn tool count; no context %, cost, rate limits or
+    /// thinking) and gates the Codex hook event branches in <see cref="OnHookEvent"/>.</summary>
+    public bool IsCodexTab => Project.Kind == ProjectKind.Codex;
+
+    /// <summary>True for Gemini tabs. Drives the same simplified status-pill branch as
+    /// Codex (model + activity dot + per-turn tool count; no context %, cost, rate limits or
+    /// thinking).</summary>
+    public bool IsGeminiTab => Project.Kind == ProjectKind.Gemini;
 
     public string StartupCommandLine
     {
@@ -219,6 +314,18 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                     ? $"& '{EscapeSingleQuote(ClaudeExecutablePath!)}'"
                     : "claude";
             }
+            else if (string.IsNullOrWhiteSpace(command) && Project.Kind == ProjectKind.Codex)
+            {
+                command = !string.IsNullOrWhiteSpace(CodexExecutablePath)
+                    ? $"& '{EscapeSingleQuote(CodexExecutablePath!)}'"
+                    : "codex";
+            }
+            else if (string.IsNullOrWhiteSpace(command) && Project.Kind == ProjectKind.Gemini)
+            {
+                command = !string.IsNullOrWhiteSpace(GeminiExecutablePath)
+                    ? $"& '{EscapeSingleQuote(GeminiExecutablePath!)}'"
+                    : "gemini";
+            }
 
             if (!string.IsNullOrWhiteSpace(command))
             {
@@ -234,6 +341,13 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                         : DefaultClaudeModel;
                     if (!string.IsNullOrWhiteSpace(model))
                         sb.Append(" --model ").Append(model);
+                }
+                else if ((Project.Kind == ProjectKind.Codex || Project.Kind == ProjectKind.Gemini)
+                    && string.IsNullOrWhiteSpace(Project.Command)
+                    && !ContainsModelFlag(Project.Args)
+                    && !string.IsNullOrWhiteSpace(Project.Model))
+                {
+                    sb.Append(" --model ").Append(Project.Model);
                 }
                 if (Resume && Project.Kind == ProjectKind.Claude)
                     sb.Append(" --resume");
@@ -320,20 +434,31 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         if (control.Connection is null) return;
         _control = control;
 
-        _logger = new SessionLogger(control, Title, LogOptions);
+        // Snapshot the model known at attach time: per-project override wins over
+        // the global Claude default. For Codex the hook-pushed model lands later
+        // via OnHookEvent and won't update the already-written preamble — the
+        // log header is a snapshot, not a live header.
+        var modelAtLaunch = !string.IsNullOrWhiteSpace(Project.Model)
+            ? Project.Model
+            : (Project.Kind == ProjectKind.Codex || Project.Kind == ProjectKind.Gemini ? null : DefaultClaudeModel);
+        _logger = new SessionLogger(control, Title, LogOptions, AgentDisplayName, modelAtLaunch);
         _logger.Attach();
 
         // The clean transcript runs in parallel with the raw VT trace. It's driven by
-        // hook events (see OnHookEvent) and reads CC's own JSONL — no ANSI scraping.
+        // hook events (see OnHookEvent) and reads the agent's own JSONL — no ANSI scraping.
         if (_logger.TranscriptPath is { } tp)
         {
-            _transcript = new TranscriptCapture(tp);
+            _transcript = new TranscriptCapture(tp, AgentDisplayName, modelAtLaunch);
             _transcript.Attach();
         }
 
+        // OSC-title scraping is a fallback for projects without Drover hooks. When
+        // hooks are installed the gateway will deliver authoritative attention
+        // signals, so skip the regex-per-output-chunk work entirely — no Attach,
+        // no temporary CPU spike during CC's chatty startup banner.
         _monitor = new AttentionMonitor(control);
         _monitor.StateChanged += (_, s) => SetAttention(s);
-        _monitor.Attach();
+        if (!HooksInstalled) _monitor.Attach();
 
         // If we never see a recognisable title within 5s, surface that in the UI
         // so a missing/broken Claude launch doesn't sit silently as a grey dot.
@@ -349,6 +474,95 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
 
         _clipboard = new ClipboardIntegration(control);
         _clipboard.Attach();
+
+        if (Project.Kind == ProjectKind.Codex)
+        {
+            StartCodexHookWatchdog();
+            WriteMissingApiKeyBannerIfNeeded();
+        }
+    }
+
+    /// <summary>
+    /// Codex requires <c>OPENAI_API_KEY</c> (env var) or a populated
+    /// <c>~/.codex/auth.json</c> (from <c>codex login</c>). If neither is
+    /// present, Codex emits a cryptic error and dies. Write an informational
+    /// banner into the renderer before Codex starts so the user has a clear
+    /// diagnosis. Don't block launch — Codex may evolve other auth flows
+    /// (OAuth, device code) that Drover wouldn't know about.
+    /// </summary>
+    private void WriteMissingApiKeyBannerIfNeeded()
+    {
+        if (HasOpenAiApiKey()) return;
+        var pty = _control?.Connection;
+        if (pty is null) return;
+        const string msg =
+            "\r\n\x1b[33m[Drover] Codex needs OPENAI_API_KEY. Set it in this project's environment variables " +
+            "(right-click ▸ Edit project ▸ API key) or run `codex login` to populate ~/.codex/auth.json.\x1b[0m\r\n";
+        try { pty.RaiseRendererOutput(msg); } catch { /* renderer torn down */ }
+    }
+
+    private bool HasOpenAiApiKey()
+    {
+        if (Project.EnvVars is { } pv && pv.TryGetValue("OPENAI_API_KEY", out var pk) && !string.IsNullOrEmpty(pk))
+            return true;
+        if (GlobalEnvVars is { } gv && gv.TryGetValue("OPENAI_API_KEY", out var gk) && !string.IsNullOrEmpty(gk))
+            return true;
+        var inherited = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        if (!string.IsNullOrEmpty(inherited)) return true;
+        try
+        {
+            var home = Environment.GetEnvironmentVariable("USERPROFILE")
+                       ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(home)
+                && System.IO.File.Exists(System.IO.Path.Combine(home, ".codex", "auth.json")))
+                return true;
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>
+    /// Starts the one-shot 10-second "no hook events yet" watchdog for Codex
+    /// tabs. Cancels itself the moment <see cref="OnHookEvent"/> fires; if it
+    /// reaches Tick the user almost certainly needs to <c>codex trust .</c>
+    /// the project directory. DispatcherTimer is dispatcher-affine so the
+    /// arming has to happen on the UI thread.
+    /// </summary>
+    private void StartCodexHookWatchdog()
+    {
+        DispatchToUi(() =>
+        {
+            if (_codexHookWatchdogFired) return;
+            _codexHookWatchdog?.Stop();
+            _codexHookWatchdog = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromSeconds(10),
+            };
+            _codexHookWatchdog.Tick += OnCodexHookWatchdogTick;
+            _codexHookWatchdog.Start();
+        });
+    }
+
+    private void OnCodexHookWatchdogTick(object? sender, EventArgs e)
+    {
+        _codexHookWatchdog?.Stop();
+        if (_codexHookWatchdogFired) return;
+        _codexHookWatchdogFired = true;
+        const string msg = "Codex isn't firing hooks into Drover. If you installed project-local hooks, try `codex trust .` in the tab and reopen.";
+        CodexHookSilent?.Invoke(this, msg);
+    }
+
+    private void CancelCodexHookWatchdog()
+    {
+        if (_codexHookWatchdog is null) return;
+        DispatchToUi(() =>
+        {
+            _codexHookWatchdog?.Stop();
+            _codexHookWatchdog = null;
+        });
+        // Mark fired=true so a late re-arm (e.g. statusLine after Tick already
+        // queued) can't replay the toast.
+        _codexHookWatchdogFired = true;
     }
 
     public event EventHandler<(AttentionState previous, AttentionState next)>? AttentionChanged;
@@ -361,6 +575,14 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// generic working→idle transition.
     /// </summary>
     public event EventHandler<string>? PermissionPrompted;
+
+    /// <summary>
+    /// Codex-only: raised once if no hook event arrives within 10 seconds of
+    /// the tab being attached. Codex's project-scope hooks no-op silently
+    /// without <c>codex trust .</c>; this is the user-visible nudge. Carries
+    /// the toast text the shell should display.
+    /// </summary>
+    public event EventHandler<string>? CodexHookSilent;
 
     /// <summary>
     /// Fires after a Claude Code statusLine push has been parsed and the Cc* fields
@@ -446,6 +668,10 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                 && vm.TryGetProperty("mode", out var vmm) && vmm.ValueKind == System.Text.Json.JsonValueKind.String)
                 vimMode = vmm.GetString() ?? string.Empty;
 
+            string permissionMode = string.Empty;
+            if (root.TryGetProperty("permission_mode", out var pm) && pm.ValueKind == System.Text.Json.JsonValueKind.String)
+                permissionMode = pm.GetString() ?? string.Empty;
+
             string worktreeBranch = string.Empty;
             if (root.TryGetProperty("worktree", out var wt) && wt.ValueKind == System.Text.Json.JsonValueKind.Object
                 && wt.TryGetProperty("branch", out var wtb) && wtb.ValueKind == System.Text.Json.JsonValueKind.String)
@@ -488,6 +714,14 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                 CcOutputStyle = outputStyle;
                 CcVimMode = vimMode;
                 CcWorktreeBranch = worktreeBranch;
+                CcPermissionMode = permissionMode;
+                PermissionModeText = permissionMode switch
+                {
+                    "plan" => "plan mode",
+                    "acceptEdits" => "auto-accept",
+                    "bypassPermissions" => "bypass",
+                    _ => string.Empty,
+                };
                 if (effortLevel is not null)
                 {
                     EffortText = effortLevel;
@@ -565,6 +799,40 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         return false;
     }
 
+    // Pulls permission_mode from a hook payload (UserPromptSubmit and friends carry
+    // it as a top-level string) and pushes it through the same display switch the
+    // statusLine path uses. Tolerates absent / malformed JSON — most events won't
+    // include the field and that's fine, we just leave the previous value in place.
+    private void TryApplyPermissionMode(string? rawBody)
+    {
+        if (string.IsNullOrWhiteSpace(rawBody)) return;
+        string? mode = null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(rawBody);
+            if (doc.RootElement.TryGetProperty("permission_mode", out var pm)
+                && pm.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                mode = pm.GetString();
+            }
+        }
+        catch { return; }
+
+        if (mode is null) return;
+        var text = mode switch
+        {
+            "plan" => "plan mode",
+            "acceptEdits" => "auto-accept",
+            "bypassPermissions" => "bypass",
+            _ => string.Empty,
+        };
+        DispatchToUi(() =>
+        {
+            CcPermissionMode = mode;
+            PermissionModeText = text;
+        });
+    }
+
     public void OnHookEvent(HookEvent evt)
     {
         // Hooks are the primary attention signal; once one arrives we know the
@@ -572,10 +840,33 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         // the PTY read-loop free of regex work on every output chunk.
         _monitor?.Detach();
 
+        // First hook event proves the Codex → Drover path is alive — defuse
+        // the trusted-directory watchdog so a healthy install never toasts.
+        CancelCodexHookWatchdog();
+
         // Same hook stream feeds the clean transcript writer. Boundary events
         // (UserPromptSubmit / PostToolUse / Stop) carry transcript_path; the
         // capturer tails CC's JSONL incrementally.
         _transcript?.OnHookEvent(evt);
+
+        // permission_mode isn't in CC's statusLine JSON yet, but the hook envelope
+        // (UserPromptSubmit at minimum) carries it. Mirror it into the same fields
+        // the statusLine path writes so the in-tab pill lights up regardless of
+        // which signal got there first.
+        TryApplyPermissionMode(evt.RawBody);
+
+        // Codex has no statusLine; the hook envelope is the only signal carrying
+        // `model`. Mirror it into both CodexModel (per spec, lets the simplified
+        // pill bind without re-using the rich Claude path) and ModelText (so the
+        // existing tab-header model badge lights up for free).
+        if (evt.Kind == HookAgentKind.Codex && !string.IsNullOrWhiteSpace(evt.Model))
+        {
+            DispatchToUi(() =>
+            {
+                CodexModel = evt.Model;
+                ModelText = evt.Model!;
+            });
+        }
 
         var next = evt.Type switch
         {
@@ -611,14 +902,60 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                 PermissionPrompted?.Invoke(this, msg);
             });
         }
+        else if (evt.Kind == HookAgentKind.Codex && evt.Type == "PermissionRequest")
+        {
+            // Codex emits PermissionRequest as its own dedicated event (no
+            // Notification overloading like Claude). Surface tool name + a
+            // truncated tool_input preview so the strip is informative.
+            // Approve/deny stays inline in the terminal; Drover is read-only
+            // until Phase 2 wires a forwarder-blocking response path.
+            var tool = string.IsNullOrWhiteSpace(evt.Tool) ? "tool" : evt.Tool!;
+            var preview = TruncateForStripPreview(evt.ToolInput, maxChars: 80);
+            var msg = string.IsNullOrEmpty(preview)
+                ? $"Codex needs permission to run {tool}"
+                : $"Codex needs permission to run {tool}: {preview}";
+            DispatchToUi(() =>
+            {
+                PermissionPromptText = msg;
+                PermissionPrompted?.Invoke(this, msg);
+            });
+        }
         else if (next is not null && !string.IsNullOrEmpty(PermissionPromptText))
         {
+            // First PreToolUse / PostToolUse / Stop / UserPromptSubmit after
+            // a PermissionRequest clears the strip — same logic Claude uses.
             DispatchToUi(() => PermissionPromptText = string.Empty);
+        }
+
+        // Codex per-turn tool counter. Reset on UserPromptSubmit (new turn);
+        // increment on PreToolUse so the counter reflects "tools attempted
+        // this turn" and stays visible after Stop until the next prompt.
+        if (evt.Kind == HookAgentKind.Codex)
+        {
+            if (evt.Type == "UserPromptSubmit")
+            {
+                DispatchToUi(() =>
+                {
+                    CodexToolCountThisTurn = 0;
+                    CodexToolCountText = string.Empty;
+                });
+            }
+            else if (evt.Type == "PreToolUse")
+            {
+                DispatchToUi(() =>
+                {
+                    CodexToolCountThisTurn += 1;
+                    CodexToolCountText = CodexToolCountThisTurn == 1
+                        ? "1 tool"
+                        : $"{CodexToolCountThisTurn} tools";
+                });
+            }
         }
 
         // Live activity strip. Pre/PostToolUse carry tool_name; surface a
         // friendly one-liner ("Reading file…", "Running bash…") and (re)arm
-        // the decay timer. Stop / SessionStart clear it immediately.
+        // the decay timer. Stop / SessionStart clear it immediately. Shared
+        // across Claude and Codex — the spec's "reuse what Claude has" call.
         if (evt.Type == "PreToolUse" || evt.Type == "PostToolUse")
         {
             if (!string.IsNullOrWhiteSpace(evt.Tool))
@@ -639,6 +976,20 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                 _toolDecayTimer?.Stop();
             });
         }
+    }
+
+    /// <summary>
+    /// Truncates a raw <c>tool_input</c> JSON blob for display in the amber
+    /// permission strip. Strips outer whitespace and collapses internal newlines
+    /// so a multi-line shell command renders as one readable line. ≤80 chars
+    /// per the spec; an ellipsis is appended when content was cut.
+    /// </summary>
+    private static string TruncateForStripPreview(string? raw, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        var collapsed = System.Text.RegularExpressions.Regex
+            .Replace(raw.Trim(), @"\s+", " ");
+        return collapsed.Length <= maxChars ? collapsed : collapsed[..(maxChars - 1)] + "…";
     }
 
     // CC fires a Notification ~60s after Stop with "Claude is waiting for your input"
@@ -831,6 +1182,8 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         _workingTimer = null;
         _toolDecayTimer?.Stop();
         _toolDecayTimer = null;
+        _codexHookWatchdog?.Stop();
+        _codexHookWatchdog = null;
         _logger?.Dispose();
         _logger = null;
         _transcript?.Dispose();

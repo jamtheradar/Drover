@@ -12,6 +12,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -30,13 +31,29 @@
 
         <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,12">
             <TextBlock Text="Kind" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,0" />
-            <RadioButton x:Name="KindClaude"       Content="Claude"        IsChecked="True" Foreground="{StaticResource Chrome.Text}" Margin="0,0,12,0" />
+            <RadioButton x:Name="KindClaude"       Content="Claude"        IsChecked="True" Foreground="{StaticResource Chrome.Text}" Margin="0,0,12,0"
+                         Checked="Kind_Checked" />
             <RadioButton x:Name="KindClaudeDirect" Content="Claude (direct)"                Foreground="{StaticResource Chrome.Text}" Margin="0,0,12,0"
+                         Checked="Kind_Checked"
                          ToolTip="Launch claude.exe straight from CreateProcess — no pwsh wrapper. Faster startup; the tab closes when claude exits (no shell stays open)." />
-            <RadioButton x:Name="KindPwsh"         Content="pwsh"                           Foreground="{StaticResource Chrome.Text}" />
+            <RadioButton x:Name="KindCodex"        Content="Codex (OpenAI)"                 Foreground="{StaticResource Chrome.Text}" Margin="0,0,12,0"
+                         Checked="Kind_Checked"
+                         ToolTip="Launch the OpenAI Codex CLI. Resolves 'codex' on PATH unless Settings ▸ General ▸ Codex executable is set." />
+            <RadioButton x:Name="KindGemini"       Content="Gemini (Google)"                Foreground="{StaticResource Chrome.Text}" Margin="0,0,12,0"
+                         Checked="Kind_Checked"
+                         ToolTip="Launch the Google Gemini CLI. Resolves 'gemini' on PATH unless Settings ▸ General ▸ Gemini executable is set." />
+            <RadioButton x:Name="KindPwsh"         Content="pwsh"                           Foreground="{StaticResource Chrome.Text}"
+                         Checked="Kind_Checked" />
         </StackPanel>
 
-        <Expander Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3"
+        <StackPanel x:Name="ApiKeyRow" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3"
+                    Orientation="Horizontal" Margin="0,0,0,12" Visibility="Collapsed">
+            <TextBlock x:Name="ApiKeyLabel" Text="OpenAI API key" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <PasswordBox x:Name="ApiKeyBox" Width="320" Padding="4"
+                         ToolTip="Stored as OPENAI_API_KEY (Codex) or GEMINI_API_KEY (Gemini) in this project's environment." />
+        </StackPanel>
+
+        <Expander Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3"
                   Header="Advanced"
                   Foreground="{StaticResource Chrome.TextMuted}"
                   IsExpanded="False">
@@ -96,15 +113,25 @@
                                  TextChanged="TabColorBox_TextChanged"
                                  ToolTip="Hex color for this project's tab background, e.g. #3D7EFF. Leave blank for default." />
                     </DockPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                        <Button Content="" Width="22" Height="18" Margin="0,0,4,0" Click="TabColorPreset_Click" Tag="#3D7EFF" Background="#3D7EFF" BorderThickness="0" />
-                        <Button Content="" Width="22" Height="18" Margin="0,0,4,0" Click="TabColorPreset_Click" Tag="#7EC07E" Background="#7EC07E" BorderThickness="0" />
-                        <Button Content="" Width="22" Height="18" Margin="0,0,4,0" Click="TabColorPreset_Click" Tag="#FFB454" Background="#FFB454" BorderThickness="0" />
-                        <Button Content="" Width="22" Height="18" Margin="0,0,4,0" Click="TabColorPreset_Click" Tag="#E06C75" Background="#E06C75" BorderThickness="0" />
-                        <Button Content="" Width="22" Height="18" Margin="0,0,4,0" Click="TabColorPreset_Click" Tag="#C586C0" Background="#C586C0" BorderThickness="0" />
-                        <Button Content="" Width="22" Height="18" Margin="0,0,8,0" Click="TabColorPreset_Click" Tag="#5BBFAA" Background="#5BBFAA" BorderThickness="0" />
-                        <Button Content="Clear" Padding="6,0" Click="TabColorClear_Click" />
-                    </StackPanel>
+                    <WrapPanel Margin="0,4,0,0">
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#3D7EFF" Background="#3D7EFF" BorderThickness="0" ToolTip="#3D7EFF" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#4FC1FF" Background="#4FC1FF" BorderThickness="0" ToolTip="#4FC1FF" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#5BBFAA" Background="#5BBFAA" BorderThickness="0" ToolTip="#5BBFAA" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#7EC07E" Background="#7EC07E" BorderThickness="0" ToolTip="#7EC07E" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#A0E681" Background="#A0E681" BorderThickness="0" ToolTip="#A0E681" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#FFD86B" Background="#FFD86B" BorderThickness="0" ToolTip="#FFD86B" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#FFB454" Background="#FFB454" BorderThickness="0" ToolTip="#FFB454" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#FF8C42" Background="#FF8C42" BorderThickness="0" ToolTip="#FF8C42" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#E06C75" Background="#E06C75" BorderThickness="0" ToolTip="#E06C75" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#FF6FB5" Background="#FF6FB5" BorderThickness="0" ToolTip="#FF6FB5" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#C586C0" Background="#C586C0" BorderThickness="0" ToolTip="#C586C0" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#8B7CF6" Background="#8B7CF6" BorderThickness="0" ToolTip="#8B7CF6" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,4,4" Click="TabColorPreset_Click" Tag="#94A3B8" Background="#94A3B8" BorderThickness="0" ToolTip="#94A3B8" />
+                        <Button Content="" Width="22" Height="18" Margin="0,0,8,4" Click="TabColorPreset_Click" Tag="#B4724A" Background="#B4724A" BorderThickness="0" ToolTip="#B4724A" />
+                        <Button Content="Custom…" Padding="6,0" Margin="0,0,4,4" Click="TabColorPick_Click"
+                                ToolTip="Open the color picker to choose any color." />
+                        <Button Content="Clear" Padding="6,0" Margin="0,0,0,4" Click="TabColorClear_Click" />
+                    </WrapPanel>
                 </StackPanel>
 
                 <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
@@ -136,7 +163,7 @@
             </Grid>
         </Expander>
 
-        <StackPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+        <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
             <Button Content="Cancel" Padding="12,4" Margin="0,0,8,0" IsCancel="True" />
             <Button x:Name="SubmitButton" Content="Add"    Padding="12,4" IsDefault="True" Click="Add_Click" />
         </StackPanel>

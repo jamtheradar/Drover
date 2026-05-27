@@ -18,6 +18,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly ActivityLog _activity;
     private readonly HooksGateway _hooks;
     private readonly HooksInstaller _hooksInstaller;
+    private readonly CodexHooksInstaller _codexHooksInstaller;
     private readonly GitStatusService _gitStatus;
     private readonly LiveTodoStore _liveTodos;
     private readonly AgentCatalog _agents;
@@ -73,6 +74,10 @@ public sealed partial class ShellViewModel : ObservableObject
     /// baseline). Persisted back to settings whenever the user adjusts it
     /// from the Settings window.</summary>
     [ObservableProperty] private double _panelFontScale = 1.0;
+    /// <summary>Font size (in points) for the bottom status bar. Sourced from
+    /// <see cref="AppSettings.StatusBarFontSize"/>. Bound directly by status-bar
+    /// text/buttons in ShellWindow.xaml.</summary>
+    [ObservableProperty] private double _statusBarFontSize = 13;
     public ObservableCollection<Drover.App.Models.PlanFileEntry> AvailablePlans { get; } = new();
 
     // ─── Task panel state (parallels Plan panel) ────────────────────────────
@@ -341,6 +346,15 @@ public sealed partial class ShellViewModel : ObservableObject
         if (KanbanPanelVisible) Kanban.OnTabChanged(value);
         if (SpecsPanelVisible) Specs.OnTabChanged(value);
         if (VaultPanelVisible) SyncVaultActiveProject();
+
+        // Throttle output coalescing on every other tab so background sessions
+        // can't collectively flood the UI dispatcher and lag the focused tab's
+        // keyboard echo. See ConPtyConnection.IsForeground.
+        foreach (var tab in Tabs)
+        {
+            var pty = tab.GetCurrentConnection();
+            if (pty is not null) pty.IsForeground = ReferenceEquals(tab, value);
+        }
     }
 
     partial void OnTokenomicsActiveChanged(bool value)
@@ -361,13 +375,14 @@ public sealed partial class ShellViewModel : ObservableObject
     public SpecsPanelViewModel Specs { get; }
     public VaultViewModel Vault { get; }
 
-    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller, GitStatusService gitStatus, LiveTodoStore liveTodos, AgentCatalog agents, BuildStatusTracker buildTracker, GateRegistry gates, ToastNotifier toaster, TemplateService templateService, PromptLibrary promptLibrary, SpecsPanelViewModel specs, SkillsRepoCatalog skillsRepoCatalog, VaultStore vaultStore, VaultMcpInstaller vaultMcpInstaller, VaultViewModel vault)
+    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller, CodexHooksInstaller codexHooksInstaller, GitStatusService gitStatus, LiveTodoStore liveTodos, AgentCatalog agents, BuildStatusTracker buildTracker, GateRegistry gates, ToastNotifier toaster, TemplateService templateService, PromptLibrary promptLibrary, SpecsPanelViewModel specs, SkillsRepoCatalog skillsRepoCatalog, VaultStore vaultStore, VaultMcpInstaller vaultMcpInstaller, VaultViewModel vault)
     {
         _catalog = catalog;
         _settings = settings;
         _activity = activity;
         _hooks = hooks;
         _hooksInstaller = hooksInstaller;
+        _codexHooksInstaller = codexHooksInstaller;
         _gitStatus = gitStatus;
         _liveTodos = liveTodos;
         _agents = agents;
@@ -391,6 +406,10 @@ public sealed partial class ShellViewModel : ObservableObject
         if (pfs <= 0) pfs = 12;
         _panelFontScale = System.Math.Clamp(pfs / 12.0, 0.7, 2.5);
 
+        var sbfs = _settings.Current.StatusBarFontSize;
+        if (sbfs <= 0) sbfs = 11;
+        _statusBarFontSize = System.Math.Clamp(sbfs, 9, 24);
+
         // Pick up out-of-band edits from the Settings dialog. Marshal to the UI
         // dispatcher because Changed fires on whatever thread called Update.
         _settings.Changed += (_, _) =>
@@ -398,9 +417,23 @@ public sealed partial class ShellViewModel : ObservableObject
             var size = _settings.Current.PanelFontSize;
             if (size <= 0) size = 12;
             var scale = System.Math.Clamp(size / 12.0, 0.7, 2.5);
+            var sb = _settings.Current.StatusBarFontSize;
+            if (sb <= 0) sb = 11;
+            var sbClamped = (double)System.Math.Clamp(sb, 9, 24);
             var dispatcher = System.Windows.Application.Current?.Dispatcher;
-            if (dispatcher is null || dispatcher.CheckAccess()) PanelFontScale = scale;
-            else dispatcher.BeginInvoke(new System.Action(() => PanelFontScale = scale));
+            if (dispatcher is null || dispatcher.CheckAccess())
+            {
+                PanelFontScale = scale;
+                StatusBarFontSize = sbClamped;
+            }
+            else
+            {
+                dispatcher.BeginInvoke(new System.Action(() =>
+                {
+                    PanelFontScale = scale;
+                    StatusBarFontSize = sbClamped;
+                }));
+            }
         };
 
         // Project list mirror — wraps the persisted ProjectDefinition records with
@@ -408,7 +441,7 @@ public sealed partial class ShellViewModel : ObservableObject
         // lock-step with _catalog.Projects via CollectionChanged below.
         foreach (var p in _catalog.Projects)
         {
-            ProjectItems.Add(new ProjectListItem(p));
+            ProjectItems.Add(new ProjectListItem(p) { VaultEnabled = _vaultMcpInstaller.IsInstalled(p.Path) });
             _gitStatus.Watch(p.Path);
         }
         _catalog.Projects.CollectionChanged += OnCatalogChanged;
@@ -535,7 +568,7 @@ public sealed partial class ShellViewModel : ObservableObject
         var tab = FindTabForProject(project.Path);
         if (tab is null)
         {
-            StatusText = "Open a Claude Code session for this project first.";
+            StatusText = "Open an agent session for this project first.";
             return;
         }
         string prompt;
@@ -595,9 +628,17 @@ public sealed partial class ShellViewModel : ObservableObject
         try
         {
             var result = _vaultMcpInstaller.Install(project.Path);
+            foreach (var item in ProjectItems)
+            {
+                if (string.Equals(item.Path, project.Path, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    item.VaultEnabled = true;
+                    break;
+                }
+            }
             string body;
             if (result.WasFresh)
-                body = $"Vault MCP server registered for {project.Name}. Restart Claude Code sessions to pick it up.";
+                body = $"Vault MCP server registered for {project.Name}. Restart the agent session to pick it up.";
             else if (result.WasUpdated)
                 body = "Vault MCP server registration updated.";
             else
@@ -725,7 +766,7 @@ public sealed partial class ShellViewModel : ObservableObject
         var path = _hooks.LogPath;
         if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
         {
-            StatusText = "no hook events recorded yet — try a Claude turn";
+            StatusText = "no hook events recorded yet — try an agent turn";
             return;
         }
         try
@@ -830,6 +871,28 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             StatusText = $"hook install failed for {project.Name}";
         }
+    }
+
+    /// <summary>
+    /// Installs Drover's six Codex event entries into the project's
+    /// <c>.codex/hooks.json</c>. Project-scope Codex hooks no-op silently
+    /// until the user runs <c>codex trust .</c>, so the tab-open watchdog
+    /// surfaces that hint if events don't flow. The user-scope install ran
+    /// on app startup (when any Codex project exists); this exists for
+    /// project-local overrides and bespoke environments.
+    /// </summary>
+    public void InstallCodexHookForProject(ProjectDefinition? project)
+    {
+        if (project is null || string.IsNullOrEmpty(project.Path)) return;
+        if (project.Kind != ProjectKind.Codex)
+        {
+            StatusText = $"{project.Name} isn't a Codex project — skipping.";
+            return;
+        }
+        if (_codexHooksInstaller.TryInstallProject(project.Path))
+            StatusText = $"Codex hook installed in {project.Name}";
+        else
+            StatusText = $"Codex hook install failed for {project.Name}";
     }
 
     /// <summary>Rechecks hook-status for every distinct project across open tabs and the secondary slot.</summary>
@@ -967,6 +1030,18 @@ public sealed partial class ShellViewModel : ObservableObject
 
     private void OnCatalogChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
+        if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Move)
+        {
+            // Mirror a reorder without rebuilding the row — keep the ProjectListItem
+            // (and its live git/vault state) by moving it in lock-step.
+            if (e.OldStartingIndex >= 0 && e.NewStartingIndex >= 0
+                && e.OldStartingIndex < ProjectItems.Count
+                && e.NewStartingIndex < ProjectItems.Count)
+            {
+                ProjectItems.Move(e.OldStartingIndex, e.NewStartingIndex);
+            }
+            return;
+        }
         if (e.OldItems is not null)
         {
             foreach (ProjectDefinition old in e.OldItems)
@@ -985,7 +1060,7 @@ public sealed partial class ShellViewModel : ObservableObject
             foreach (ProjectDefinition added in e.NewItems)
             {
                 var idx = _catalog.Projects.IndexOf(added);
-                var item = new ProjectListItem(added);
+                var item = new ProjectListItem(added) { VaultEnabled = _vaultMcpInstaller.IsInstalled(added.Path) };
                 if (idx >= 0 && idx <= ProjectItems.Count) ProjectItems.Insert(idx, item);
                 else ProjectItems.Add(item);
                 _gitStatus.Watch(added.Path);
@@ -1035,6 +1110,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public RelayCommand<TerminalTabViewModel> CloseTabCommand { get; }
     public RelayCommand<ProjectDefinition> RemoveProjectCommand { get; }
 
+    public void MoveProject(int from, int to) => _catalog.Move(from, to);
     public void AddProject(ProjectDefinition project) => _catalog.Add(project);
     public void ReplaceProject(ProjectDefinition oldProject, ProjectDefinition newProject) => _catalog.Replace(oldProject, newProject);
 
@@ -1093,15 +1169,21 @@ public sealed partial class ShellViewModel : ObservableObject
             dangerouslySkipPermissions: dangerouslySkipPermissions,
             claudeExecutablePath: s.ClaudeExecutablePath,
             defaultClaudeModel: s.DefaultClaudeModel,
+            codexExecutablePath: s.CodexExecutablePath,
+            geminiExecutablePath: s.GeminiExecutablePath,
             globalEnvVars: s.GlobalEnvVars,
             logOptions: new SessionLogOptions(s.LogKeepCount, s.LogByteBudgetMb, s.SessionLogLevel));
-        _hooks.Register(tab.SessionId, evt =>
+        var primaryAgentKind = HookAgentKinds.FromProjectKind(project.Kind);
+        if (primaryAgentKind is { } primaryAk)
         {
-            tab.OnHookEvent(evt);
-            _liveTodos.Ingest(evt);
-            _buildTracker.Ingest(evt, tab.Project.Path);
-        });
-        _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
+            _hooks.Register(tab.SessionId, primaryAk, evt =>
+            {
+                tab.OnHookEvent(evt);
+                _liveTodos.Ingest(evt);
+                _buildTracker.Ingest(evt, tab.Project.Path);
+            });
+            _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
+        }
         tab.StatusLineUpdated += OnTabStatusLineUpdated;
         tab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
         var cached = _gitStatus.Get(project.Path);
@@ -1148,15 +1230,21 @@ public sealed partial class ShellViewModel : ObservableObject
             hooksUrl: _hooks.Url,
             claudeExecutablePath: s2.ClaudeExecutablePath,
             defaultClaudeModel: s2.DefaultClaudeModel,
+            codexExecutablePath: s2.CodexExecutablePath,
+            geminiExecutablePath: s2.GeminiExecutablePath,
             globalEnvVars: s2.GlobalEnvVars,
             logOptions: new SessionLogOptions(s2.LogKeepCount, s2.LogByteBudgetMb));
-        _hooks.Register(SecondaryTab.SessionId, evt =>
+        var secondaryAgentKind = HookAgentKinds.FromProjectKind(project.Kind);
+        if (secondaryAgentKind is { } secondaryAk)
         {
-            SecondaryTab.OnHookEvent(evt);
-            _liveTodos.Ingest(evt);
-            _buildTracker.Ingest(evt, SecondaryTab.Project.Path);
-        });
-        _hooks.RegisterStatus(SecondaryTab.SessionId, SecondaryTab.OnStatusLine);
+            _hooks.Register(SecondaryTab.SessionId, secondaryAk, evt =>
+            {
+                SecondaryTab.OnHookEvent(evt);
+                _liveTodos.Ingest(evt);
+                _buildTracker.Ingest(evt, SecondaryTab.Project.Path);
+            });
+            _hooks.RegisterStatus(SecondaryTab.SessionId, SecondaryTab.OnStatusLine);
+        }
         SecondaryTab.StatusLineUpdated += OnTabStatusLineUpdated;
         SecondaryTab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
         var cachedSec = _gitStatus.Get(project.Path);

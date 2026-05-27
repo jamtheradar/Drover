@@ -12,7 +12,48 @@
         <views:DoubleToGridLengthConverter x:Key="DoubleToGridLengthConv" />
         <views:TabColorToBrushConverter x:Key="TabColorBrushConv" />
         <views:ScaleToPercentConverter x:Key="ScaleToPercentConv" />
+        <views:HideDefaultBranchConverter x:Key="HideDefaultBranchConv" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- Right-pane close-button style — small × at the panel's top-right corner. -->
+        <Style x:Key="RightPaneCloseButton" TargetType="Button">
+            <Setter Property="Content" Value="×" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,4,6,0" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Background" Value="#33000000" />
+            <Setter Property="BorderBrush" Value="{StaticResource Chrome.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="#e0e0e0" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTip" Value="Close panel" />
+            <Setter Property="Panel.ZIndex" Value="10" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#c4262d" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <DataTemplate DataType="{x:Type vm:TerminalTabViewModel}">
             <views:TerminalTabView />
         </DataTemplate>
@@ -55,6 +96,7 @@
                               SnapsToDevicePixels="True">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="2" />
+                                <RowDefinition Height="3" />
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="1" />
                             </Grid.RowDefinitions>
@@ -64,7 +106,13 @@
                                  IsSelected trigger below paints it with the chrome accent. -->
                             <Border x:Name="TopAccent" Grid.Row="0"
                                     Background="{Binding TabColorBrush, TargetNullValue=Transparent, FallbackValue=Transparent}" />
-                            <Border x:Name="ContentHost" Grid.Row="1"
+                            <!-- SelectionAccent — second stripe directly under the project colour.
+                                 Transparent until IsSelected, then chrome-accent. Guarantees a
+                                 clear "this tab is current" cue even when every tab has a project
+                                 colour set on TopAccent. -->
+                            <Border x:Name="SelectionAccent" Grid.Row="1"
+                                    Background="Transparent" />
+                            <Border x:Name="ContentHost" Grid.Row="2"
                                     Padding="{TemplateBinding Padding}"
                                     BorderBrush="#2a2a2b"
                                     BorderThickness="0,0,1,0">
@@ -73,7 +121,7 @@
                                                   HorizontalAlignment="Left"
                                                   RecognizesAccessKey="True" />
                             </Border>
-                            <Border x:Name="BottomEdge" Grid.Row="2"
+                            <Border x:Name="BottomEdge" Grid.Row="3"
                                     Background="{StaticResource Tab.Strip.Border}" />
                         </Grid>
                         <ControlTemplate.Triggers>
@@ -84,25 +132,12 @@
                                         Value="{StaticResource Tab.Active.Foreground}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Root" Property="Background"
-                                        Value="{StaticResource Tab.Active.Background}" />
-                                <Setter TargetName="BottomEdge" Property="Background"
-                                        Value="{StaticResource Tab.Active.Background}" />
-                                <Setter Property="Foreground"
-                                        Value="{StaticResource Tab.Active.Foreground}" />
+                                <Setter TargetName="Root" Property="Background" Value="{StaticResource Tab.Active.Background}" />
+                                <Setter TargetName="BottomEdge" Property="Background" Value="{StaticResource Tab.Active.Background}" />
+                                <Setter TargetName="SelectionAccent" Property="Background" Value="{Binding TabColorBrush, TargetNullValue={StaticResource Chrome.Accent}, FallbackValue={StaticResource Chrome.Accent}}" />
+                                <Setter Property="Foreground" Value="{StaticResource Tab.Active.Foreground}" />
                                 <Setter Property="Panel.ZIndex" Value="1" />
                             </Trigger>
-                            <!-- When there's no per-project color, keep the chrome accent stripe
-                                 on selection. Skipped when TabColorBrush is set so the project
-                                 color stays visible while the tab is active. -->
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
-                                    <Condition Binding="{Binding TabColorBrush}" Value="{x:Null}" />
-                                </MultiDataTrigger.Conditions>
-                                <Setter TargetName="TopAccent" Property="Background"
-                                        Value="{StaticResource Chrome.Accent}" />
-                            </MultiDataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -235,7 +270,10 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
-                <ItemsControl ItemsSource="{Binding ProjectItems}">
+                <ItemsControl x:Name="ProjectsList" ItemsSource="{Binding ProjectItems}"
+                              PreviewMouseLeftButtonDown="ProjectsList_PreviewMouseLeftButtonDown"
+                              PreviewMouseMove="ProjectsList_PreviewMouseMove"
+                              PreviewMouseLeftButtonUp="ProjectsList_PreviewMouseLeftButtonUp">
                     <ItemsControl.Resources>
                         <!-- Indented full-width navigation row for panel shortcuts. Mirrors
                              the parent project row's hover treatment so the expanded
@@ -321,7 +359,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0"
+                                    <Button Grid.Column="0"
                                         Command="{Binding DataContext.OpenProjectCommand,
                                                   RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding Project}"
@@ -330,115 +368,125 @@
                                         Background="Transparent"
                                         Foreground="#dcdcdc"
                                         BorderThickness="0">
-                                    <StackPanel Orientation="Vertical">
-                                        <StackPanel Orientation="Horizontal">
-                                            <Ellipse Width="9" Height="9" Margin="0,0,8,0"
+                                        <StackPanel Orientation="Vertical">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Ellipse Width="9" Height="9" Margin="0,0,8,0"
                                                      VerticalAlignment="Center"
                                                      Fill="{Binding TabColor, Converter={StaticResource TabColorBrushConv}}" />
-                                            <TextBlock Text="{Binding Name}"
+                                                <TextBlock Text="{Binding Name}"
                                                        FontSize="14"
                                                        VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding GitText}"
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding GitText}"
                                                    FontSize="10"
                                                    Margin="17,1,0,0"
                                                    TextTrimming="CharacterEllipsis"
+                                                   Visibility="{Binding GitText, Converter={StaticResource HideDefaultBranchConv}}"
                                                    ToolTip="Git branch · ● dirty · ↑ ahead · ↓ behind">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding GitText}" Value="">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding GitDirty}" Value="True">
-                                                            <Setter Property="Foreground" Value="#e0c068" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </StackPanel>
-                                    <Button.ContextMenu>
-                                        <ContextMenu Opened="ProjectContextMenu_Opened">
-                                            <MenuItem Header="Launch with --dangerously-skip-permissions"
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding GitDirty}" Value="True">
+                                                                <Setter Property="Foreground" Value="#e0c068" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <Button.ContextMenu>
+                                            <ContextMenu Opened="ProjectContextMenu_Opened">
+                                                <MenuItem Header="Launch with --dangerously-skip-permissions"
                                                       Click="LaunchDangerously_Click"
                                                       ToolTip="Starts a new tab with Claude's permission prompts disabled. Use only on code/projects you trust."
                                                       Tag="{Binding PlacementTarget.DataContext.Project,
                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                            <Separator />
-                                            <MenuItem Header="Drover">
-                                            <MenuItem Header="Add skill…"
-                                                      Click="AddSkill_Click"
-                                                      ToolTip="Browse skills.sh and install one into this project's terminal via `npx skills add`."
-                                                      Tag="{Binding PlacementTarget.DataContext.Project,
-                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                                                <MenuItem.Icon>
-                                                    <TextBlock Text="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                            <Separator />
-                                            <MenuItem Header="Enable vault for this project"
-                                                      Click="EnableVault_Click"
-                                                      ToolTip="Register the drover-vault MCP server in this project's .mcp.json so Claude Code can reach the vault."
-                                                      Tag="{Binding PlacementTarget.DataContext.Project,
-                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                                                <MenuItem.Icon>
-                                                    <TextBlock Text="&#xE72E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                            <Separator />
-                                            <MenuItem Header="Initialize specs"
-                                                      Click="InitializeSpecs_Click"
-                                                      ToolTip="Copy the spec template and prompts into .drover/ for this project."
-                                                      Tag="{Binding PlacementTarget.DataContext.Project,
-                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                                                <MenuItem.Icon>
-                                                    <TextBlock Text="&#xE8A5;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                            <MenuItem Header="Enhance spec template"
-                                                      Click="EnhanceSpecTemplate_Click"
-                                                      ToolTip="Send the enhance-template prompt to the active session for this project."
-                                                      Tag="{Binding PlacementTarget.DataContext.Project,
-                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                                                <MenuItem.Icon>
-                                                    <TextBlock Text="&#xEA80;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                            <MenuItem Header="Open .drover folder"
-                                                      Click="OpenDroverFolder_Click"
-                                                      Tag="{Binding PlacementTarget.DataContext.Project,
-                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                                                <MenuItem.Icon>
-                                                    <TextBlock Text="&#xE838;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                            <Separator />
-                                            <MenuItem Header="Install Drover hook in project"
-                                                      Name="InstallHookProjectMenuItem"
-                                                      Click="InstallHook_Click"
-                                                      ToolTip="Adds Drover's hook entries to this project's .claude/settings.local.json so attention/lifecycle events flow into Drover for this folder."
-                                                      Tag="{Binding PlacementTarget.DataContext.Project,
-                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
-                                                <MenuItem.Icon>
-                                                    <TextBlock Text="&#xE71B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
-                                                </MenuItem.Icon>
-                                            </MenuItem>
-                                        </MenuItem>
-                                        <Separator />
-                                        <MenuItem Header="Edit…"
+                                                <Separator />
+                                                <MenuItem Header="Add skill…"
+                                                  Click="AddSkill_Click"
+                                                  ToolTip="Browse skills.sh and install one into this project's terminal via `npx skills add`."
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <TextBlock Text="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator />
+                                                <MenuItem Header="Enable vault for this project"
+                                                  Click="EnableVault_Click"
+                                                  ToolTip="Register the drover-vault MCP server in this project's .mcp.json so the agent can reach the vault."
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <TextBlock Text="&#xE72E;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator />
+                                                <MenuItem Header="Initialize specs"
+                                                  Click="InitializeSpecs_Click"
+                                                  ToolTip="Copy the spec template and prompts into .drover/ for this project."
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <TextBlock Text="&#xE8A5;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Header="Enhance spec template"
+                                                  Click="EnhanceSpecTemplate_Click"
+                                                  ToolTip="Send the enhance-template prompt to the active session for this project."
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <TextBlock Text="&#xEA80;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Header="Open .drover folder"
+                                                  Click="OpenDroverFolder_Click"
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <TextBlock Text="&#xE838;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator />
+                                                <MenuItem Header="Install Drover hook in project"
+                                                  Name="InstallHookProjectMenuItem"
+                                                  Click="InstallHook_Click"
+                                                  ToolTip="Adds Drover's hook entries to this project's .claude/settings.local.json so attention/lifecycle events flow into Drover for this folder."
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.Icon>
+                                                        <TextBlock Text="&#xE71B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <MenuItem Header="Install Codex hooks"
+                                                  Name="InstallCodexHookProjectMenuItem"
+                                                  Click="InstallCodexHook_Click"
+                                                  ToolTip="Adds Drover's hook entries to this project's .codex/hooks.json so attention/lifecycle events flow into Drover. Requires `codex trust .` in the project directory."
+                                                  Tag="{Binding PlacementTarget.DataContext.Project,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  Visibility="Collapsed">
+                                                    <MenuItem.Icon>
+                                                        <TextBlock Text="&#xE71B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14" Foreground="#dddddd" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                <Separator />
+                                                <MenuItem Header="Open hooks log"
+                                                  Click="OpenHooksLog_Click"
+                                                  ToolTip="JSONL log of every agent hook event the gateway received." />
+                                                <Separator />
+                                                <MenuItem Header="Edit…"
                                                   Click="EditProject_Click"
                                                   Tag="{Binding PlacementTarget.DataContext.Project,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                        <MenuItem Header="Remove"
+                                                <MenuItem Header="Remove"
                                                   Click="RemoveProject_Click"
                                                   Tag="{Binding PlacementTarget.DataContext.Project,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                        </ContextMenu>
-                                    </Button.ContextMenu>
-                                </Button>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
                                     <ToggleButton x:Name="PanelExpand"
                                                   Grid.Column="1"
                                                   Style="{StaticResource ProjectExpandChevron}"
@@ -495,7 +543,8 @@
                                     <Button Style="{StaticResource ProjectPanelRow}"
                                             Click="ShowVaultPanel_Click"
                                             ToolTip="Open the project and show the markdown vault."
-                                            Tag="{Binding Project}">
+                                            Tag="{Binding Project}"
+                                            Visibility="{Binding VaultEnabled, Converter={StaticResource BoolToVis}}">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="&#xE8F1;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13" Margin="0,0,8,0" VerticalAlignment="Center" />
                                             <TextBlock Text="Vault" VerticalAlignment="Center" />
@@ -558,6 +607,14 @@
                         Background="Transparent"
                         Foreground="{StaticResource Chrome.TextMuted}"
                         BorderThickness="0" />
+                <Button Content="Open Drover logs"
+                        Click="OpenLogs_Click"
+                        ToolTip="Open Drover's app log folder in Explorer"
+                        Margin="0,2,0,0" Padding="8,4"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
                 <Button Content="About Drover"
                         Click="About_Click"
                         Margin="0,2,0,0" Padding="8,4"
@@ -588,7 +645,7 @@
             </Grid.Style>
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="900">
                 <TextBlock Text="Drover" FontSize="36" Foreground="{StaticResource Chrome.Text}" HorizontalAlignment="Center" />
-                <TextBlock Text="mission control for Claude Code"
+                <TextBlock Text="mission control for Claude Code and Codex"
                            FontSize="13" Foreground="{StaticResource Chrome.TextMuted}"
                            HorizontalAlignment="Center" Margin="0,4,0,0" />
                 <TextBlock x:Name="WelcomeVersionText"
@@ -1491,12 +1548,27 @@
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding AttentionStale}" Value="True">
                                                         <Setter Property="Fill" Value="#a04040" />
-                                                        <Setter Property="ToolTip" Value="No attention signal — Claude Code may not be running, or its window title doesn't match the expected pattern." />
+                                                        <Setter Property="ToolTip" Value="No attention signal — the agent may not be running, or its window title doesn't match the expected pattern." />
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </Ellipse.Style>
                                     </Ellipse>
+                                    <!-- Agent badge: two-letter affordance ("CC", "CD", "CX", "PS")
+                                         driven by ProjectKind. Background tracks the tab's TabColorBrush
+                                         so the kind-default Codex tint flows here too without a separate
+                                         brush. -->
+                                    <Border Margin="0,0,6,0"
+                                            VerticalAlignment="Center"
+                                            CornerRadius="2"
+                                            Padding="4,1"
+                                            Background="{Binding TabColorBrush, TargetNullValue={StaticResource Surface.Control}, FallbackValue={StaticResource Surface.Control}}"
+                                            ToolTip="{Binding AgentDisplayName}">
+                                        <TextBlock Text="{Binding AgentBadge}"
+                                                   Foreground="{StaticResource Chrome.Text}"
+                                                   FontSize="9"
+                                                   FontWeight="SemiBold" />
+                                    </Border>
                                     <TextBlock Text="{Binding Title}"
                                                VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis"
@@ -1550,6 +1622,32 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
+                                    <!-- Codex per-turn tool count. Visible only on Codex tabs; reads
+                                         "1 tool" / "N tools" and resets to empty on UserPromptSubmit
+                                         (the formatter on the VM sets the empty string then). Sits
+                                         beside the model badge so the simplified Codex pill reads
+                                         "[ model · N tools ]" alongside the activity dot/elapsed. -->
+                                    <TextBlock Text="{Binding CodexToolCountText, StringFormat=' · {0}'}"
+                                               FontSize="10"
+                                               Foreground="{StaticResource Chrome.TextMuted}"
+                                               ToolTip="Tools used this Codex turn (resets on next prompt).">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding IsCodexTab}" Value="True" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                    <DataTrigger Binding="{Binding CodexToolCountText}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                     <TextBlock Text="{Binding GitText, StringFormat=' · {0}'}"
                                                FontSize="10"
                                                TextTrimming="CharacterEllipsis"
@@ -1573,6 +1671,11 @@
                                 <!-- Live tool-call strip. Populated from PreToolUse/PostToolUse
                                      hooks ("Reading file…", "Running bash…"); decays after ~3s
                                      of silence and clears immediately on Stop / SessionStart. -->
+                                <!-- Always rendered (Hidden, not Collapsed) when empty so the
+                                     tab strip's height never changes on tool-call activity.
+                                     A growing/shrinking strip reflows the whole shell grid,
+                                     which causes the terminal HWND to flicker on every status
+                                     update across tabs. -->
                                 <TextBlock Text="{Binding CurrentToolText}"
                                            Foreground="{StaticResource Chrome.TextMuted}"
                                            FontSize="10"
@@ -1580,18 +1683,8 @@
                                            Margin="14,1,0,0"
                                            TextTrimming="CharacterEllipsis"
                                            MaxWidth="220"
-                                           ToolTip="Latest tool call from Claude.">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Visibility" Value="Visible" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding CurrentToolText}" Value="">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
+                                           MinHeight="14"
+                                           ToolTip="Latest tool call from Claude." />
                                 <!-- Permission-prompt strip. Visible only when Claude has fired
                                      a Notification hook (e.g. waiting on tool approval). Click
                                      selects this tab and brings the window forward — useful
@@ -1677,10 +1770,6 @@
                                     <MenuItem Header="Find… (Ctrl+F)"
                                               Click="Find_Click"
                                               Tag="{Binding}" />
-                                    <Separator />
-                                    <MenuItem Header="Open hooks log"
-                                              Click="OpenHooksLog_Click"
-                                              ToolTip="JSONL log of every Claude Code hook event the gateway received." />
                                 </ContextMenu>
                             </Grid.ContextMenu>
                         </Grid>
@@ -1759,11 +1848,15 @@
                 BorderBrush="{StaticResource Chrome.Border}"
                 BorderThickness="1,0,0,0"
                 Visibility="{Binding PlanPanelVisible, Converter={StaticResource BoolToVis}}">
-            <views:PlanPanel>
-                <views:PlanPanel.LayoutTransform>
-                    <ScaleTransform ScaleX="{Binding PanelFontScale}" ScaleY="{Binding PanelFontScale}" />
-                </views:PlanPanel.LayoutTransform>
-            </views:PlanPanel>
+            <Grid>
+                <views:PlanPanel>
+                    <views:PlanPanel.LayoutTransform>
+                        <ScaleTransform ScaleX="{Binding PanelFontScale}" ScaleY="{Binding PanelFontScale}" />
+                    </views:PlanPanel.LayoutTransform>
+                </views:PlanPanel>
+                <Button Style="{StaticResource RightPaneCloseButton}"
+                        Command="{Binding TogglePlanPanelCommand}" />
+            </Grid>
         </Border>
 
         <!-- Tasks panel — mutually exclusive with Plan and Activity. -->
@@ -1772,11 +1865,15 @@
                 BorderBrush="{StaticResource Chrome.Border}"
                 BorderThickness="1,0,0,0"
                 Visibility="{Binding TaskPanelVisible, Converter={StaticResource BoolToVis}}">
-            <views:TaskPanel>
-                <views:TaskPanel.LayoutTransform>
-                    <ScaleTransform ScaleX="{Binding PanelFontScale}" ScaleY="{Binding PanelFontScale}" />
-                </views:TaskPanel.LayoutTransform>
-            </views:TaskPanel>
+            <Grid>
+                <views:TaskPanel>
+                    <views:TaskPanel.LayoutTransform>
+                        <ScaleTransform ScaleX="{Binding PanelFontScale}" ScaleY="{Binding PanelFontScale}" />
+                    </views:TaskPanel.LayoutTransform>
+                </views:TaskPanel>
+                <Button Style="{StaticResource RightPaneCloseButton}"
+                        Command="{Binding ToggleTaskPanelCommand}" />
+            </Grid>
         </Border>
 
         <!-- File explorer panel — mutually exclusive with Plan, Tasks, Activity. -->
@@ -1785,11 +1882,15 @@
                 BorderBrush="{StaticResource Chrome.Border}"
                 BorderThickness="1,0,0,0"
                 Visibility="{Binding FileExplorerPanelVisible, Converter={StaticResource BoolToVis}}">
-            <views:FileExplorerPanel>
-                <views:FileExplorerPanel.LayoutTransform>
-                    <ScaleTransform ScaleX="{Binding PanelFontScale}" ScaleY="{Binding PanelFontScale}" />
-                </views:FileExplorerPanel.LayoutTransform>
-            </views:FileExplorerPanel>
+            <Grid>
+                <views:FileExplorerPanel>
+                    <views:FileExplorerPanel.LayoutTransform>
+                        <ScaleTransform ScaleX="{Binding PanelFontScale}" ScaleY="{Binding PanelFontScale}" />
+                    </views:FileExplorerPanel.LayoutTransform>
+                </views:FileExplorerPanel>
+                <Button Style="{StaticResource RightPaneCloseButton}"
+                        Command="{Binding ToggleFileExplorerPanelCommand}" />
+            </Grid>
         </Border>
 
         <!-- Kanban board — mutually exclusive with the other right-pane panels. -->
@@ -1798,12 +1899,16 @@
                 BorderBrush="{StaticResource Chrome.Border}"
                 BorderThickness="1,0,0,0"
                 Visibility="{Binding KanbanPanelVisible, Converter={StaticResource BoolToVis}}">
-            <views:KanbanPanel>
-                <views:KanbanPanel.LayoutTransform>
-                    <ScaleTransform ScaleX="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    ScaleY="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}" />
-                </views:KanbanPanel.LayoutTransform>
-            </views:KanbanPanel>
+            <Grid>
+                <views:KanbanPanel>
+                    <views:KanbanPanel.LayoutTransform>
+                        <ScaleTransform ScaleX="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        ScaleY="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    </views:KanbanPanel.LayoutTransform>
+                </views:KanbanPanel>
+                <Button Style="{StaticResource RightPaneCloseButton}"
+                        Command="{Binding ToggleKanbanPanelCommand}" />
+            </Grid>
         </Border>
 
         <!-- Specs panel — mutually exclusive with the other right-pane panels. -->
@@ -1813,12 +1918,16 @@
                 BorderThickness="1,0,0,0"
                 DataContext="{Binding Specs}"
                 Visibility="{Binding DataContext.SpecsPanelVisible, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
-            <views:SpecsPanel>
-                <views:SpecsPanel.LayoutTransform>
-                    <ScaleTransform ScaleX="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    ScaleY="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}" />
-                </views:SpecsPanel.LayoutTransform>
-            </views:SpecsPanel>
+            <Grid>
+                <views:SpecsPanel>
+                    <views:SpecsPanel.LayoutTransform>
+                        <ScaleTransform ScaleX="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        ScaleY="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    </views:SpecsPanel.LayoutTransform>
+                </views:SpecsPanel>
+                <Button Style="{StaticResource RightPaneCloseButton}"
+                        Command="{Binding DataContext.ToggleSpecsPanelCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+            </Grid>
         </Border>
 
         <!-- Vault panel — mutually exclusive with the other right-pane panels. Singleton VM
@@ -1829,12 +1938,16 @@
                 BorderThickness="1,0,0,0"
                 DataContext="{Binding Vault}"
                 Visibility="{Binding DataContext.VaultPanelVisible, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVis}}">
-            <views:VaultPanel>
-                <views:VaultPanel.LayoutTransform>
-                    <ScaleTransform ScaleX="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}"
-                                    ScaleY="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}" />
-                </views:VaultPanel.LayoutTransform>
-            </views:VaultPanel>
+            <Grid>
+                <views:VaultPanel>
+                    <views:VaultPanel.LayoutTransform>
+                        <ScaleTransform ScaleX="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        ScaleY="{Binding DataContext.PanelFontScale, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    </views:VaultPanel.LayoutTransform>
+                </views:VaultPanel>
+                <Button Style="{StaticResource RightPaneCloseButton}"
+                        Command="{Binding DataContext.ToggleVaultPanelCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+            </Grid>
         </Border>
 
         <!-- Activity timeline pane -->
@@ -1851,6 +1964,9 @@
                 <TextBlock Grid.Row="0" Text="Activity" Margin="12,10"
                            Foreground="{StaticResource Chrome.TextMuted}"
                            FontSize="11" FontWeight="SemiBold" />
+                <Button Grid.Row="0" Grid.RowSpan="2"
+                        Style="{StaticResource RightPaneCloseButton}"
+                        Command="{Binding ToggleActivityCommand}" />
                 <ListBox Grid.Row="1"
                          ItemsSource="{Binding Activity.Entries}"
                          Background="Transparent"
@@ -1884,7 +2000,7 @@
                     <Setter Property="Background" Value="Transparent" />
                     <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
                     <Setter Property="BorderThickness" Value="0" />
-                    <Setter Property="FontSize" Value="11" />
+                    <Setter Property="FontSize" Value="{Binding StatusBarFontSize, RelativeSource={RelativeSource AncestorType=Window}}" />
                     <Setter Property="Padding" Value="10,0" />
                     <Setter Property="Cursor" Value="Hand" />
                     <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -2027,18 +2143,21 @@
                     <Border DockPanel.Dock="Right" Padding="10,0" VerticalAlignment="Stretch"
                             ToolTip="Aggregate Claude spend today across all projects (parsed from ~/.claude transcripts).">
                         <TextBlock Text="{Binding DailyCostText}"
-                                   Foreground="{StaticResource Chrome.Text}" FontSize="11"
+                                   Foreground="{StaticResource Chrome.Text}"
+                                   FontSize="{Binding StatusBarFontSize}"
                                    VerticalAlignment="Center" />
                     </Border>
                     <Border DockPanel.Dock="Left" Padding="14,0,8,0" VerticalAlignment="Stretch"
                             ToolTip="Drover application version.">
                         <TextBlock Text="{x:Static svc:AppInfo.DisplayVersion}"
-                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                   Foreground="{StaticResource Chrome.TextMuted}"
+                                   FontSize="{Binding StatusBarFontSize}"
                                    VerticalAlignment="Center" />
                     </Border>
                     <Border DockPanel.Dock="Left" Width="1" Background="{StaticResource Chrome.Border}" Margin="0,4" />
                     <Border DockPanel.Dock="Left" Padding="14,0" VerticalAlignment="Stretch">
-                        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource Chrome.TextMuted}"
+                                   FontSize="{Binding StatusBarFontSize}"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     </Border>
                 </DockPanel>

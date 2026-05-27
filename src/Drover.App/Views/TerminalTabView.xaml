@@ -66,6 +66,33 @@
                         <TextBlock Text="{Binding EffortText}"
                                    Foreground="#e0c8f0" FontSize="12" FontWeight="SemiBold" />
                     </Border>
+                    <!-- Codex per-turn tool count. The simplified Codex pill substitutes
+                         this for the rich Claude metrics (context %, cost, rate limits,
+                         thinking budget) since the Codex hook envelope doesn't surface
+                         any of those. Hidden on Claude tabs and on Codex tabs between
+                         turns (UserPromptSubmit resets the formatted string to empty). -->
+                    <Border Background="#2c3a48" CornerRadius="3" Padding="8,3" Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Tools used this Codex turn (resets on next prompt).">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding IsCodexTab}" Value="True" />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                    <DataTrigger Binding="{Binding CodexToolCountText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding CodexToolCountText}"
+                                   Foreground="#cfe7ff" FontSize="12" FontWeight="SemiBold" />
+                    </Border>
                 </StackPanel>
 
                 <!-- Centre: project + path -->
@@ -224,6 +251,50 @@
                             </Style>
                         </Border.Style>
                         <TextBlock Text="{Binding CcVimMode}" Foreground="#e0c0a0" FontSize="10" FontWeight="SemiBold" />
+                    </Border>
+
+                    <!-- Permission mode (statusLine: permission_mode). Hidden in default mode;
+                         colour-coded so bypassPermissions reads as "be careful". -->
+                    <Border CornerRadius="3" Padding="6,2" Margin="0,0,8,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Claude Code permission mode (from statusLine).">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#2a2a3a" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding PermissionModeText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding CcPermissionMode}" Value="plan">
+                                        <Setter Property="Background" Value="#3a3320" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding CcPermissionMode}" Value="acceptEdits">
+                                        <Setter Property="Background" Value="#1f3a26" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding CcPermissionMode}" Value="bypassPermissions">
+                                        <Setter Property="Background" Value="#4a1f1f" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding PermissionModeText}" FontSize="10" FontWeight="SemiBold">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#c8c8e0" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding CcPermissionMode}" Value="plan">
+                                            <Setter Property="Foreground" Value="#e8d68a" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding CcPermissionMode}" Value="acceptEdits">
+                                            <Setter Property="Foreground" Value="#9ed8a8" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding CcPermissionMode}" Value="bypassPermissions">
+                                            <Setter Property="Foreground" Value="#f0a0a0" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                     </Border>
 
                     <!-- Hook badge (moved to right cluster). -->

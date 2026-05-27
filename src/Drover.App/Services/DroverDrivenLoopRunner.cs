@@ -13,6 +13,7 @@ namespace Drover.App.Services;
 public sealed class DroverDrivenLoopRunner : ILoopRunner
 {
     private readonly IPromptLibrary _prompts;
+    private readonly HookAgentKind _agentKind;
 
     /// <summary>How long to wait between specs for the session to settle
     /// before sending the next prompt. Avoids racing the session's own
@@ -25,9 +26,11 @@ public sealed class DroverDrivenLoopRunner : ILoopRunner
     /// stopping the loop with an error is the right call.</summary>
     private static readonly System.TimeSpan PerSpecTimeout = System.TimeSpan.FromHours(2);
 
-    public DroverDrivenLoopRunner(IPromptLibrary prompts)
+    public DroverDrivenLoopRunner(IPromptLibrary prompts,
+                                  HookAgentKind agentKind = HookAgentKind.Claude)
     {
         _prompts = prompts;
+        _agentKind = agentKind;
     }
 
     public async Task RunAsync(
@@ -55,7 +58,7 @@ public sealed class DroverDrivenLoopRunner : ILoopRunner
             string prompt;
             try
             {
-                prompt = _prompts.Resolve("execute-spec", projectRoot,
+                prompt = _prompts.Resolve("execute-spec", projectRoot, _agentKind,
                     new Dictionary<string, string> { ["SPEC_FILENAME"] = spec.FileName });
             }
             catch (System.Exception ex)

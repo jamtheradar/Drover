@@ -40,6 +40,9 @@ public partial class SettingsWindow : Window
         PanelSizeBox.ItemsSource = Sizes;
         PanelSizeBox.SelectedItem = Sizes.Contains(store.Current.PanelFontSize) ? store.Current.PanelFontSize : 12;
 
+        StatusBarSizeBox.ItemsSource = Sizes;
+        StatusBarSizeBox.SelectedItem = Sizes.Contains(store.Current.StatusBarFontSize) ? store.Current.StatusBarFontSize : 11;
+
         ResumeBox.IsChecked = store.Current.ResumeOnRestore;
         TakeOverStatusLineBox.IsChecked = store.Current.TakeOverStatusLine;
         HooksEnabledBox.IsChecked = store.Current.HooksEnabled;
@@ -58,6 +61,8 @@ public partial class SettingsWindow : Window
         DefaultModelBox.Text = store.Current.DefaultClaudeModel ?? string.Empty;
 
         ClaudePathBox.Text = store.Current.ClaudeExecutablePath ?? string.Empty;
+        CodexPathBox.Text = store.Current.CodexExecutablePath ?? string.Empty;
+        GeminiPathBox.Text = store.Current.GeminiExecutablePath ?? string.Empty;
         StartupBox.IsChecked = store.Current.StartWithWindows && WindowsStartupService.IsEnabled();
 
         if (store.Current.GlobalEnvVars is { Count: > 0 })
@@ -98,6 +103,36 @@ public partial class SettingsWindow : Window
             try { dlg.InitialDirectory = System.IO.Path.GetDirectoryName(ClaudePathBox.Text); } catch { }
         }
         if (dlg.ShowDialog(this) == true) ClaudePathBox.Text = dlg.FileName;
+    }
+
+    private void BrowseCodex_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Select codex executable",
+            Filter = "Executables (*.exe;*.cmd;*.bat;*.ps1)|*.exe;*.cmd;*.bat;*.ps1|All files (*.*)|*.*",
+            CheckFileExists = true
+        };
+        if (!string.IsNullOrWhiteSpace(CodexPathBox.Text))
+        {
+            try { dlg.InitialDirectory = System.IO.Path.GetDirectoryName(CodexPathBox.Text); } catch { }
+        }
+        if (dlg.ShowDialog(this) == true) CodexPathBox.Text = dlg.FileName;
+    }
+
+    private void BrowseGemini_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Select gemini executable",
+            Filter = "Executables (*.exe;*.cmd;*.bat;*.ps1)|*.exe;*.cmd;*.bat;*.ps1|All files (*.*)|*.*",
+            CheckFileExists = true
+        };
+        if (!string.IsNullOrWhiteSpace(GeminiPathBox.Text))
+        {
+            try { dlg.InitialDirectory = System.IO.Path.GetDirectoryName(GeminiPathBox.Text); } catch { }
+        }
+        if (dlg.ShowDialog(this) == true) GeminiPathBox.Text = dlg.FileName;
     }
 
     private static Dictionary<string, string>? ParseEnv(string text)
@@ -141,6 +176,7 @@ public partial class SettingsWindow : Window
         var fam = (FontBox.SelectedItem as string) ?? "Cascadia Code";
         var size = SizeBox.SelectedItem is int s ? s : 12;
         var panelSize = PanelSizeBox.SelectedItem is int ps ? ps : 12;
+        var statusBarSize = StatusBarSizeBox.SelectedItem is int ss ? ss : 11;
         var resume = ResumeBox.IsChecked == true;
         var takeOverStatusLine = TakeOverStatusLineBox.IsChecked == true;
         var hooksEnabled = HooksEnabledBox.IsChecked == true;
@@ -152,6 +188,8 @@ public partial class SettingsWindow : Window
         var mdTheme = (MdThemeBox.SelectedItem as string) ?? MarkdownThemes.DefaultName;
         var defaultModel = (DefaultModelBox.Text ?? string.Empty).Trim();
         var claudePath = (ClaudePathBox.Text ?? string.Empty).Trim();
+        var codexPath = (CodexPathBox.Text ?? string.Empty).Trim();
+        var geminiPath = (GeminiPathBox.Text ?? string.Empty).Trim();
         var startWithWindows = StartupBox.IsChecked == true;
         var globalEnv = ParseEnv(GlobalEnvBox.Text);
         var logKeep = int.TryParse(LogKeepBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var k) && k >= 0
@@ -186,6 +224,7 @@ public partial class SettingsWindow : Window
             FontFamily = fam,
             FontSize = size,
             PanelFontSize = panelSize,
+            StatusBarFontSize = statusBarSize,
             ResumeOnRestore = resume,
             TakeOverStatusLine = takeOverStatusLine,
             HooksEnabled = hooksEnabled,
@@ -196,6 +235,8 @@ public partial class SettingsWindow : Window
             MarkdownTheme = mdTheme,
             DefaultClaudeModel = defaultModel,
             ClaudeExecutablePath = claudePath,
+            CodexExecutablePath = codexPath,
+            GeminiExecutablePath = geminiPath,
             StartWithWindows = startWithWindows,
             GlobalEnvVars = globalEnv,
             LogKeepCount = logKeep,

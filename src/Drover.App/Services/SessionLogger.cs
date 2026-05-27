@@ -77,11 +77,27 @@ public sealed class SessionLogger : IDisposable
 
     public SessionLogLevel Level => _level;
 
-    public SessionLogger(DroverTerminal control, string tabTitle, SessionLogOptions? options = null)
+    /// <summary>
+    /// Friendly agent name for the preamble header (e.g. "Claude", "Codex",
+    /// "PowerShell"). Null falls back to the empty form ("agent: —"). Source:
+    /// the owning tab's <c>AgentDisplayName</c>.
+    /// </summary>
+    public string? AgentDisplayName { get; }
+
+    /// <summary>
+    /// Model identifier known at logger-construction time (per-project override
+    /// or global default). Hook-derived models that land later won't update an
+    /// already-written preamble — the preamble is a snapshot, not a live header.
+    /// </summary>
+    public string? Model { get; }
+
+    public SessionLogger(DroverTerminal control, string tabTitle, SessionLogOptions? options = null, string? agentDisplayName = null, string? model = null)
     {
         _control = control;
         var opts = options ?? new SessionLogOptions();
         _level = opts.Level;
+        AgentDisplayName = agentDisplayName;
+        Model = model;
         var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Drover", "logs");
         Directory.CreateDirectory(dir);
         var byteBudget = opts.ByteBudgetMb <= 0 ? long.MaxValue : (long)opts.ByteBudgetMb * 1024 * 1024;
@@ -89,7 +105,7 @@ public sealed class SessionLogger : IDisposable
         PruneOldLogs(dir, keepCount, byteBudget);
         var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var safeTitle = Sanitize(tabTitle);
-        var basePath = System.IO.Path.Combine(dir, $"{stamp}_{safeTitle}");
+        var basePath = System.IO.Path.Combine(dir, $"{safeTitle}_{stamp}");
         Path = _level == SessionLogLevel.Full ? basePath + ".log" : null;
         TranscriptPath = _level == SessionLogLevel.Off ? null : basePath + ".transcript.md";
     }
@@ -133,7 +149,9 @@ public sealed class SessionLogger : IDisposable
         try
         {
             _writer = new StreamWriter(Path, append: false, Encoding.UTF8);
-            _writer.WriteLine($"# Drover session log — {DateTime.Now:O}");
+            var agentLabel = string.IsNullOrWhiteSpace(AgentDisplayName) ? "—" : AgentDisplayName!;
+            var modelLabel = string.IsNullOrWhiteSpace(Model) ? "—" : Model!;
+            _writer.WriteLine($"# Drover session — agent: {agentLabel} — model: {modelLabel} — started {DateTime.Now:O}");
         }
         catch
         {

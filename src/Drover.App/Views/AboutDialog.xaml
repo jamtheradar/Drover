@@ -28,8 +28,9 @@
 
             <TextBlock Margin="0,18,0,0" TextWrapping="Wrap"
                        Foreground="{StaticResource Chrome.Text}" FontSize="12">
-                Mission control for Claude Code. Hosts multiple sessions in tabs alongside
-                a project library, dashboard, plan / task panels, and a markdown memory editor.
+                Mission control for Claude Code and Codex. Hosts multiple agent sessions in
+                tabs alongside a project library, dashboard, plan / task panels, and a markdown
+                memory editor.
             </TextBlock>
 
             <TextBlock Margin="0,18,0,0" Foreground="{StaticResource Chrome.TextMuted}"
