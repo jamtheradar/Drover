@@ -1,0 +1,142 @@
+<Window x:Class="Drover.App.Views.TranscriptHistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Session history"
+        Width="1100" Height="760"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Chrome.Background}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,0,1" Padding="20,12">
+            <DockPanel LastChildFill="True">
+                <Button DockPanel.Dock="Right"
+                        Content="&#xE72C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                        ToolTip="Reload the transcript list from disk"
+                        Click="Refresh_Click"
+                        Padding="8,6" Margin="8,0,0,0"
+                        VerticalAlignment="Center"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
+                <TextBox DockPanel.Dock="Right"
+                         x:Name="SearchBox"
+                         Width="280"
+                         Padding="8,6"
+                         FontSize="12"
+                         VerticalAlignment="Center"
+                         TextChanged="Search_Changed"
+                         PreviewKeyDown="Search_PreviewKeyDown" />
+                <TextBlock DockPanel.Dock="Right"
+                           Text="Search"
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           FontSize="11"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <ComboBox DockPanel.Dock="Right"
+                          x:Name="ProjectFilter"
+                          MinWidth="160"
+                          VerticalAlignment="Center"
+                          Margin="0,0,16,0"
+                          SelectionChanged="ProjectFilter_Changed"
+                          ToolTip="Show only transcripts from one project" />
+                <TextBlock DockPanel.Dock="Right"
+                           Text="Project"
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           FontSize="11"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0" />
+                <StackPanel>
+                    <TextBlock Text="Session history" FontSize="18"
+                               Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold" />
+                    <TextBlock x:Name="SubtitleText"
+                               Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                               Margin="0,2,0,0" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="340" MinWidth="220" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <ListBox Grid.Column="0" x:Name="Sessions"
+                     Background="{StaticResource Chrome.Panel}"
+                     Foreground="{StaticResource Chrome.Text}"
+                     BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     SelectionChanged="Sessions_SelectionChanged"
+                     MouseDoubleClick="Sessions_MouseDoubleClick"
+                     ToolTip="Double-click to open the transcript file">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="2,4">
+                            <TextBlock Text="{Binding Title}"
+                                       FontSize="12" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding MetaLine}"
+                                       Foreground="{StaticResource Chrome.TextMuted}"
+                                       FontSize="11" Margin="0,2,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding MatchLabel}"
+                                       Foreground="{StaticResource Chrome.AttentionIdle}"
+                                       FontSize="11" Margin="0,2,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding MatchLabel}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <GridSplitter Grid.Column="1" Width="4"
+                          HorizontalAlignment="Stretch"
+                          Background="{StaticResource Chrome.Border}" />
+
+            <Grid Grid.Column="2" x:Name="ViewerHost">
+                <Grid.Resources>
+                    <!-- Wider bar than the app default so the match ticks are readable
+                         and the thumb is easy to grab in long transcripts. -->
+                    <Style TargetType="ScrollBar" BasedOn="{StaticResource {x:Type ScrollBar}}">
+                        <Style.Triggers>
+                            <Trigger Property="Orientation" Value="Vertical">
+                                <Setter Property="Width" Value="18" />
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Resources>
+                <FlowDocumentScrollViewer x:Name="Viewer"
+                                          Padding="24,16"
+                                          Background="Transparent"
+                                          IsToolBarVisible="False"
+                                          VerticalScrollBarVisibility="Auto" />
+                <Canvas x:Name="MatchMarks" IsHitTestVisible="False" ClipToBounds="True" />
+            </Grid>
+        </Grid>
+
+        <Border Grid.Row="2" Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,1,0,0" Padding="14,8">
+            <TextBlock x:Name="StatusLine"
+                       Text="Esc to close · type to search all transcripts · Enter/F3 next match · Shift+F3 previous"
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       FontSize="11" />
+        </Border>
+    </Grid>
+</Window>

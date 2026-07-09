@@ -1,10 +1,7 @@
-using System;
-using System.Collections.Generic;
+using Drover.App.ViewModels;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Windows.Threading;
-using Drover.App.ViewModels;
 
 namespace Drover.App.Services;
 
@@ -27,14 +24,22 @@ public sealed class TokenStats
     private static readonly System.Text.RegularExpressions.Regex BudgetTokensRx =
         new(@"\\?""budget_tokens\\?""\s*:\s*(\d+)", System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    // Best-effort pricing per 1M tokens (USD) for common Claude models. Updated 2026-04.
+    // Best-effort pricing per 1M tokens (USD) for common Claude models. Updated 2026-07.
+    // Cache read = 0.1× input, cache write = 1.25× input (5-minute TTL).
     // We fail-soft to zero if we don't recognise the model; cost is informational only.
     private static readonly Dictionary<string, (double input, double output, double cacheRead, double cacheWrite)> Pricing =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["claude-opus-4-7"] = (15, 75, 1.5, 18.75),
-            ["claude-opus-4-6"] = (15, 75, 1.5, 18.75),
+            ["claude-fable-5"] = (10, 50, 1.0, 12.5),
+            ["claude-mythos-5"] = (10, 50, 1.0, 12.5),
+            ["claude-opus-4-8"] = (5, 25, 0.5, 6.25),
+            ["claude-opus-4-7"] = (5, 25, 0.5, 6.25),
+            ["claude-opus-4-6"] = (5, 25, 0.5, 6.25),
+            ["claude-opus-4-5"] = (5, 25, 0.5, 6.25),
+            // Opus 4.0/4.1 were the last $15/$75 Opus models.
             ["claude-opus-4"] = (15, 75, 1.5, 18.75),
+            // Sonnet 5 lists at $3/$15; an intro rate of $2/$10 applies through 2026-08-31.
+            ["claude-sonnet-5"] = (3, 15, 0.3, 3.75),
             ["claude-sonnet-4-6"] = (3, 15, 0.3, 3.75),
             ["claude-sonnet-4-5"] = (3, 15, 0.3, 3.75),
             ["claude-sonnet-4"] = (3, 15, 0.3, 3.75),
@@ -454,8 +459,8 @@ public sealed class TokenStats
         if (budget >= 63_999) return "max";
         if (budget >= 31_999) return "xhigh";
         if (budget >= 12_000) return "high";
-        if (budget >= 4_000)  return "medium";
-        if (budget > 0)       return "low";
+        if (budget >= 4_000) return "medium";
+        if (budget > 0) return "low";
         return string.Empty;
     }
 
@@ -505,8 +510,23 @@ public sealed class TokenStats
     {
         if (model is null) return 0;
         var key = NormalizeModel(model);
-        if (!Pricing.TryGetValue(key, out var p)) return 0;
+        if (!Pricing.TryGetValue(key, out var p) && !TryFamilyPricing(key, out p)) return 0;
         return (input * p.input + output * p.output + cacheRead * p.cacheRead + cacheWrite * p.cacheWrite) / 1_000_000.0;
+    }
+
+    /// <summary>
+    /// Fallback for model ids newer than the table above: price by family so a new
+    /// release degrades to "approximately right" instead of zeroing every cost figure
+    /// on the dashboard (which is what happened when claude-fable-5 shipped).
+    /// </summary>
+    private static bool TryFamilyPricing(string key, out (double input, double output, double cacheRead, double cacheWrite) p)
+    {
+        if (key.Contains("fable") || key.Contains("mythos")) { p = (10, 50, 1.0, 12.5); return true; }
+        if (key.Contains("opus")) { p = (5, 25, 0.5, 6.25); return true; }
+        if (key.Contains("sonnet")) { p = (3, 15, 0.3, 3.75); return true; }
+        if (key.Contains("haiku")) { p = (1, 5, 0.1, 1.25); return true; }
+        p = default;
+        return false;
     }
 
     private static string NormalizeModel(string model)

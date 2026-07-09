@@ -39,12 +39,14 @@ public sealed class TranscriptCapture : IDisposable
     public string Path { get; }
     public string? AgentDisplayName { get; }
     public string? Model { get; }
+    public string? ProjectName { get; }
 
-    public TranscriptCapture(string path, string? agentDisplayName = null, string? model = null)
+    public TranscriptCapture(string path, string? agentDisplayName = null, string? model = null, string? projectName = null)
     {
         Path = path;
         AgentDisplayName = agentDisplayName;
         Model = model;
+        ProjectName = projectName;
     }
 
     public void Attach()
@@ -54,7 +56,8 @@ public sealed class TranscriptCapture : IDisposable
             _writer = new StreamWriter(Path, append: false, Utf8NoBom) { AutoFlush = false };
             var agentLabel = string.IsNullOrWhiteSpace(AgentDisplayName) ? "—" : AgentDisplayName!;
             var modelLabel = string.IsNullOrWhiteSpace(Model) ? "—" : Model!;
-            _writer.WriteLine($"<!-- Drover transcript — agent: {agentLabel} — model: {modelLabel} — started {DateTime.Now:O} -->");
+            var projectLabel = string.IsNullOrWhiteSpace(ProjectName) ? "—" : ProjectName!;
+            _writer.WriteLine($"<!-- Drover transcript — agent: {agentLabel} — model: {modelLabel} — project: {projectLabel} — started {DateTime.Now:O} -->");
             _writer.WriteLine();
             _writer.Flush();
         }

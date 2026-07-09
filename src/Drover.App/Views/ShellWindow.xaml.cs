@@ -394,6 +394,14 @@ public partial class ShellWindow : Window
         dlg.ShowDialog();
     }
 
+    private void SessionHistory_Click(object sender, RoutedEventArgs e) => ShowSessionHistory();
+
+    public void ShowSessionHistory()
+    {
+        var win = new TranscriptHistoryWindow { Owner = this };
+        win.Show();
+    }
+
     private void CheatSheet_Click(object sender, RoutedEventArgs e) => ShowCheatSheet();
 
     private void ShowCheatSheet()
@@ -680,10 +688,20 @@ public partial class ShellWindow : Window
     {
         if (sender is not System.Windows.Controls.MenuItem mi) return;
         if (mi.Tag is not ViewModels.TerminalTabViewModel tab) return;
-        if (tab.LogFilePath is null || !System.IO.File.Exists(tab.LogFilePath)) return;
+        tab.FlushSessionLog();
+        // The raw VT trace only exists at the Full logging level; at the default
+        // Transcript level the clean .transcript.md is the session log.
+        var path = tab.LogFilePath;
+        if (path is null || !System.IO.File.Exists(path)) path = tab.TranscriptFilePath;
+        if (path is null || !System.IO.File.Exists(path))
+        {
+            if (DataContext is ShellViewModel vm)
+                vm.StatusText = $"no session log on disk for {tab.Title} — logging may be Off";
+            return;
+        }
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(tab.LogFilePath) { UseShellExecute = true });
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
         }
         catch { /* shell verb not registered — ignore */ }
     }
@@ -711,7 +729,7 @@ public partial class ShellWindow : Window
         var path = Services.HistoryExporter.Export(tab);
         if (path is null)
         {
-            vm.StatusText = $"export failed: {tab.Title} (no log available)";
+            vm.StatusText = $"export failed: {tab.Title} — no session log on disk (logging may be Off); see app.log";
             return;
         }
         vm.StatusText = $"exported: {path}";

@@ -104,6 +104,14 @@ public partial class CommandPalette : Window
             "hooks",
             () => _shell.OpenHooksLog()));
 
+        list.Add(new PaletteAction(
+            "Session history: browse & search transcripts",
+            "history",
+            () =>
+            {
+                if (_owner is ShellWindow sw) sw.ShowSessionHistory();
+            }));
+
         return list;
     }
 

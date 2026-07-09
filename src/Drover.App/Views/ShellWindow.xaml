@@ -592,6 +592,14 @@
                         Background="Transparent"
                         Foreground="{StaticResource Chrome.Text}"
                         BorderThickness="0" />
+                <Button Content="Session history"
+                        Click="SessionHistory_Click"
+                        ToolTip="Browse and search past session transcripts"
+                        Margin="0,2,0,0" Padding="8,4"
+                        HorizontalContentAlignment="Left"
+                        Background="Transparent"
+                        Foreground="{StaticResource Chrome.TextMuted}"
+                        BorderThickness="0" />
                 <Button Content="Cheat sheet"
                         Click="CheatSheet_Click"
                         ToolTip="Claude Code shortcuts, slash commands, and CLI flags (F1)"

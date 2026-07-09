@@ -33,14 +33,19 @@ public partial class FindWindow : Window
 
     private void LoadLog()
     {
-        if (_tab.LogFilePath is null || !File.Exists(_tab.LogFilePath))
+        _tab.FlushSessionLog();
+        // The raw VT trace only exists at the Full logging level; at the default
+        // Transcript level the clean .transcript.md is the session log.
+        var path = _tab.LogFilePath;
+        if (path is null || !File.Exists(path)) path = _tab.TranscriptFilePath;
+        if (path is null || !File.Exists(path))
         {
-            StatusLine.Text = "no log file yet";
+            StatusLine.Text = "no session log on disk — logging may be Off";
             return;
         }
         try
         {
-            using var fs = new FileStream(_tab.LogFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var reader = new StreamReader(fs);
             var raw = reader.ReadToEnd();
             raw = VtStrip.Replace(raw, string.Empty);

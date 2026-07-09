@@ -37,16 +37,41 @@ public static class HistoryExporter
 
     public static string? Export(TerminalTabViewModel tab)
     {
-        var src = tab.LogFilePath;
-        if (string.IsNullOrEmpty(src) || !File.Exists(src)) return null;
-
-        // Push any in-flight chunks to disk so the export reflects what the user
-        // sees right now, not what the writer happened to flush 250 ms ago.
+        // Push any in-flight chunks (raw trace + transcript) to disk so the export
+        // reflects what the user sees right now, not whatever was flushed 250 ms ago.
         tab.FlushSessionLog();
 
-        // FileShare.ReadWrite — SessionLogger keeps a StreamWriter open on this
-        // file with FileAccess.Write, so the default FileShare.Read used by
-        // File.ReadAllText would throw a sharing violation.
+        // Prefer the clean Markdown transcript — it exists in the default Transcript
+        // log level and is the readable artefact. Fall back to the raw VT trace, which
+        // only exists when session logging is set to Full. When neither is on disk the
+        // most likely cause is logging set to Off (or a never-attached logger).
+        var transcript = tab.TranscriptFilePath;
+        var rawLog = tab.LogFilePath;
+
+        string src;
+        bool fromTranscript;
+        if (!string.IsNullOrEmpty(transcript) && File.Exists(transcript))
+        {
+            src = transcript;
+            fromTranscript = true;
+        }
+        else if (!string.IsNullOrEmpty(rawLog) && File.Exists(rawLog))
+        {
+            src = rawLog;
+            fromTranscript = false;
+        }
+        else
+        {
+            AppLog.Warn("HistoryExporter",
+                $"Export skipped for '{tab.Title}': no session log on disk " +
+                $"(transcript='{transcript ?? "<null>"}', raw='{rawLog ?? "<null>"}'). " +
+                "Session logging is likely set to Off.");
+            return null;
+        }
+
+        // FileShare.ReadWrite — the writer keeps a StreamWriter open on this file,
+        // so the default FileShare.Read used by File.ReadAllText would throw a
+        // sharing violation.
         string raw;
         try
         {
@@ -54,32 +79,65 @@ public static class HistoryExporter
             using var reader = new StreamReader(fs, Encoding.UTF8);
             raw = reader.ReadToEnd();
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            AppLog.Error("HistoryExporter", $"Failed to read source log '{src}' for '{tab.Title}'.", ex);
+            return null;
+        }
 
-        var stripped = Strip(raw);
+        string path;
+        string body;
+        try
+        {
+            var dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
+                "Drover", "exports");
+            Directory.CreateDirectory(dir);
 
-        var dir = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
-            "Drover", "exports");
-        Directory.CreateDirectory(dir);
+            var stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var safeTitle = Sanitize(tab.Title);
+            path = Path.Combine(dir, $"{stamp}_{safeTitle}.md");
 
-        var stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var safeTitle = Sanitize(tab.Title);
-        var path = Path.Combine(dir, $"{stamp}_{safeTitle}.md");
+            var sb = new StringBuilder(raw.Length + 256);
+            sb.Append("# ").Append(tab.Title).Append('\n');
+            sb.Append("- **Project:** ").Append(tab.Project.Name).Append('\n');
+            sb.Append("- **Path:** ").Append(tab.Project.Path).Append('\n');
+            sb.Append("- **Exported:** ").Append(System.DateTime.Now.ToString("O")).Append('\n');
+            sb.Append("- **Source log:** `").Append(src).Append("`\n\n");
 
-        var sb = new StringBuilder(stripped.Length + 256);
-        sb.Append("# ").Append(tab.Title).Append('\n');
-        sb.Append("- **Project:** ").Append(tab.Project.Name).Append('\n');
-        sb.Append("- **Path:** ").Append(tab.Project.Path).Append('\n');
-        sb.Append("- **Exported:** ").Append(System.DateTime.Now.ToString("O")).Append('\n');
-        sb.Append("- **Source log:** `").Append(src).Append("`\n\n");
-        sb.Append("```\n");
-        sb.Append(stripped);
-        if (!stripped.EndsWith('\n')) sb.Append('\n');
-        sb.Append("```\n");
+            if (fromTranscript)
+            {
+                // The transcript is already clean Markdown — emit it verbatim. Wrapping
+                // it in a code fence would destroy its formatting.
+                sb.Append(raw);
+                if (!raw.EndsWith('\n')) sb.Append('\n');
+            }
+            else
+            {
+                // Raw VT trace — strip control sequences and fence the residual text.
+                var stripped = Strip(raw);
+                sb.Append("```\n");
+                sb.Append(stripped);
+                if (!stripped.EndsWith('\n')) sb.Append('\n');
+                sb.Append("```\n");
+            }
 
-        try { File.WriteAllText(path, sb.ToString(), Encoding.UTF8); }
-        catch { return null; }
+            body = sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("HistoryExporter", $"Failed to build export for '{tab.Title}'.", ex);
+            return null;
+        }
 
+        try { File.WriteAllText(path, body, Encoding.UTF8); }
+        catch (Exception ex)
+        {
+            AppLog.Error("HistoryExporter", $"Failed to write export file '{path}' for '{tab.Title}'.", ex);
+            return null;
+        }
+
+        AppLog.Info("HistoryExporter",
+            $"Exported '{tab.Title}' to '{path}' (source: {(fromTranscript ? "transcript" : "raw trace")}).");
         return path;
     }
 

@@ -246,12 +246,25 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     public string? LogFilePath => _logger?.Path;
 
     /// <summary>
+    /// Path to the clean Markdown transcript (.transcript.md). Populated in both the
+    /// default Transcript level and Full; null only when session logging is Off. Unlike
+    /// <see cref="LogFilePath"/> this exists in the default config, so it's the primary
+    /// source for <see cref="HistoryExporter"/>.
+    /// </summary>
+    public string? TranscriptFilePath => _transcript?.Path;
+
+    /// <summary>
     /// Forces the background session-log writer to drain pending chunks and
     /// flush the StreamWriter. Used by <see cref="HistoryExporter"/> so the
     /// exported markdown reflects the current on-screen state, not whatever
-    /// happened to be flushed up to ~250 ms ago.
+    /// happened to be flushed up to ~250 ms ago. Flushes both the raw VT trace
+    /// and the clean transcript.
     /// </summary>
-    public void FlushSessionLog() => _logger?.Flush();
+    public void FlushSessionLog()
+    {
+        _logger?.Flush();
+        _transcript?.Flush();
+    }
 
     /// <summary>True for Claude-flavored kinds (Claude, ClaudeDirect) — controls whether
     /// CLAUDE_CODE_NO_FLICKER, --model/--resume/--dangerously-skip-permissions, and the
@@ -448,7 +461,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         // hook events (see OnHookEvent) and reads the agent's own JSONL — no ANSI scraping.
         if (_logger.TranscriptPath is { } tp)
         {
-            _transcript = new TranscriptCapture(tp, AgentDisplayName, modelAtLaunch);
+            _transcript = new TranscriptCapture(tp, AgentDisplayName, modelAtLaunch, Project.Name);
             _transcript.Attach();
         }
 
@@ -590,6 +603,92 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// across tabs without polling. Always raised on the UI dispatcher.
     /// </summary>
     public event EventHandler? StatusLineUpdated;
+
+    /// <summary>
+    /// Fires when the set of running subagents changes (Task/Agent tool launch or
+    /// return, or a turn boundary clearing everything). May be raised from the
+    /// gateway's background thread — consumers marshal to the UI dispatcher.
+    /// </summary>
+    public event EventHandler? RunningAgentsChanged;
+
+    // Running subagents keyed by tool_use_id → subagent_type. PreToolUse on the
+    // Task/Agent tool adds; the matching PostToolUse removes; Stop/SessionStart/
+    // SessionEnd clear (no subagent outlives its parent turn). Guarded by the
+    // lock because the gateway writes from a background task while the Agents
+    // panel reads from the UI thread.
+    private readonly System.Collections.Generic.Dictionary<string, string> _runningSubagents = new();
+    private readonly object _runningSubagentsLock = new();
+
+    /// <summary>
+    /// Distinct subagent types currently running in this tab (e.g. "Explore",
+    /// "code-reviewer"). Snapshot — safe to enumerate from any thread.
+    /// </summary>
+    public System.Collections.Generic.IReadOnlyList<string> RunningAgentTypes
+    {
+        get
+        {
+            lock (_runningSubagentsLock)
+            {
+                var set = new System.Collections.Generic.HashSet<string>(_runningSubagents.Values, StringComparer.OrdinalIgnoreCase);
+                var list = new System.Collections.Generic.List<string>(set);
+                list.Sort(StringComparer.OrdinalIgnoreCase);
+                return list;
+            }
+        }
+    }
+
+    private static bool IsSubagentLaunchTool(string? tool)
+        => tool is "Task" or "Agent";
+
+    /// <summary>
+    /// Pulls <c>subagent_type</c> out of a Task/Agent tool_input blob. The field
+    /// is optional on the wire — omitted means the default agent, which Claude
+    /// Code documents as "general-purpose".
+    /// </summary>
+    private static string ReadSubagentType(string? toolInputJson)
+    {
+        if (!string.IsNullOrWhiteSpace(toolInputJson))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(toolInputJson);
+                if (doc.RootElement.TryGetProperty("subagent_type", out var v)
+                    && v.ValueKind == System.Text.Json.JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(v.GetString()))
+                    return v.GetString()!;
+            }
+            catch { /* malformed tool_input — fall through to default */ }
+        }
+        return "general-purpose";
+    }
+
+    private void TrackSubagents(HookEvent evt)
+    {
+        bool changed = false;
+        if (IsSubagentLaunchTool(evt.Tool) && evt.Type is "PreToolUse" or "PostToolUse")
+        {
+            var agentType = ReadSubagentType(evt.ToolInput);
+            // tool_use_id pairs launch/return exactly; without it fall back to the
+            // type name — parallel same-type agents then collapse to one entry,
+            // which is fine for a "who's working" pulse.
+            var key = evt.ToolUseId ?? $"type:{agentType}";
+            lock (_runningSubagentsLock)
+            {
+                changed = evt.Type == "PreToolUse"
+                    ? _runningSubagents.TryAdd(key, agentType)
+                    : _runningSubagents.Remove(key);
+            }
+        }
+        else if (evt.Type is "Stop" or "SessionStart" or "SessionEnd")
+        {
+            lock (_runningSubagentsLock)
+            {
+                changed = _runningSubagents.Count > 0;
+                _runningSubagents.Clear();
+            }
+        }
+        if (changed) RunningAgentsChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>
     /// Receives hook events routed by HooksGateway for this tab's session id.
@@ -848,6 +947,10 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         // (UserPromptSubmit / PostToolUse / Stop) carry transcript_path; the
         // capturer tails CC's JSONL incrementally.
         _transcript?.OnHookEvent(evt);
+
+        // Live subagent set for the Agents panel — Task/Agent tool launches and
+        // returns, plus turn boundaries that clear everything.
+        TrackSubagents(evt);
 
         // permission_mode isn't in CC's statusLine JSON yet, but the hook envelope
         // (UserPromptSubmit at minimum) carries it. Mirror it into the same fields
