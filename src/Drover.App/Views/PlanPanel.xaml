@@ -1,4 +1,4 @@
-<UserControl x:Class="Drover.App.Views.PlanPanel"
+﻿<UserControl x:Class="Drover.App.Views.PlanPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:Drover.App.ViewModels"
@@ -75,7 +75,7 @@
         <Border Grid.Row="0" BorderBrush="{StaticResource Chrome.Border}" BorderThickness="0,0,0,1" Padding="10,8">
             <StackPanel>
                 <DockPanel Margin="0,0,0,6">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,34,0">
                         <Button Style="{StaticResource PlanIconButton}"
                                 Command="{Binding PlanFontScaleDownCommand}"
                                 ToolTip="Decrease font (Ctrl+-)"

@@ -5,6 +5,8 @@ status: pending          # pending | in-progress | blocked | done
 created: YYYY-MM-DD
 depends_on: []           # list of spec ids, e.g. [0003, 0007]
 estimate: ""             # rough size: xs | s | m | l | xl
+agent: ""                # subagent to implement this, from .claude/agents (project) or ~/.claude/agents; "" = main session
+verify_with: ""          # reviewer subagent whose concurrence gates status: done; "" = self-assessed
 last_run_at: ""          # ISO-8601 local time, set by the loop runner
 block_severity: ""       # "" | trivial | major (set only when blocked)
 ---

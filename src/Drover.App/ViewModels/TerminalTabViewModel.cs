@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using Drover.App.Models;
 using Drover.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Drover.App.Terminal;
 using MsTerm = Microsoft.Terminal.Wpf;
 
@@ -51,6 +52,9 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _ccVimMode = string.Empty;
     [ObservableProperty] private double _ccRateLimit5hPercent;
     [ObservableProperty] private string _ccRateLimit5hResetText = string.Empty;
+    // Raw resets_at epoch (UTC) behind the display text — lets the shell compare
+    // windows across tabs instead of trusting whichever tab pushed last.
+    [ObservableProperty] private DateTime? _ccRateLimit5hResetUtc;
     [ObservableProperty] private double _ccRateLimit7dPercent;
     [ObservableProperty] private string _ccRateLimit7dResetText = string.Empty;
     [ObservableProperty] private long _ccLinesAdded;
@@ -118,7 +122,8 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         string? codexExecutablePath = null,
         string? geminiExecutablePath = null,
         System.Collections.Generic.IReadOnlyDictionary<string, string>? globalEnvVars = null,
-        Drover.App.Services.SessionLogOptions? logOptions = null)
+        Drover.App.Services.SessionLogOptions? logOptions = null,
+        bool disableClaudeMouseClicks = true)
     {
         Project = project;
         _title = title ?? project.Name;
@@ -133,6 +138,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         GeminiExecutablePath = geminiExecutablePath;
         GlobalEnvVars = globalEnvVars;
         LogOptions = logOptions;
+        DisableClaudeMouseClicks = disableClaudeMouseClicks;
         SessionId = Guid.NewGuid().ToString("N");
     }
 
@@ -148,6 +154,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     public string? GeminiExecutablePath { get; }
     public System.Collections.Generic.IReadOnlyDictionary<string, string>? GlobalEnvVars { get; }
     public Drover.App.Services.SessionLogOptions? LogOptions { get; }
+    public bool DisableClaudeMouseClicks { get; }
     public string SessionId { get; }
 
     /// <summary>
@@ -298,7 +305,11 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
 
             var sb = new StringBuilder();
             if (Project.Kind == ProjectKind.Claude)
+            {
                 sb.Append("$env:CLAUDE_CODE_NO_FLICKER=1; ");
+                if (DisableClaudeMouseClicks)
+                    sb.Append("$env:CLAUDE_CODE_DISABLE_MOUSE_CLICKS=1; ");
+            }
 
             // Hooks-gateway plumbing: configured Claude hooks can POST to this URL
             // tagged with the session id. Harmless if no hooks are configured.
@@ -393,6 +404,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                 ["CLAUDE_CODE_NO_FLICKER"] = "1",
                 ["DROVER_SESSION_ID"] = SessionId,
             };
+            if (DisableClaudeMouseClicks) env["CLAUDE_CODE_DISABLE_MOUSE_CLICKS"] = "1";
             if (!string.IsNullOrEmpty(HooksUrl)) env["DROVER_HOOKS_URL"] = HooksUrl!;
             if (GlobalEnvVars is { Count: > 0 })
                 foreach (var kv in GlobalEnvVars) env[kv.Key] = kv.Value;
@@ -604,6 +616,15 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// </summary>
     public event EventHandler? StatusLineUpdated;
 
+    /// <summary>Raised by the tab's "hook off" badge; the shell installs hooks for this project.</summary>
+    public event EventHandler? InstallHooksRequested;
+
+    [RelayCommand]
+    private void RequestInstallHooks()
+    {
+        if (!HooksInstalled) InstallHooksRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     /// <summary>
     /// Fires when the set of running subagents changes (Task/Agent tool launch or
     /// return, or a turn boundary clearing everything). May be raised from the
@@ -611,11 +632,15 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// </summary>
     public event EventHandler? RunningAgentsChanged;
 
-    // Running subagents keyed by tool_use_id → subagent_type. PreToolUse on the
-    // Task/Agent tool adds; the matching PostToolUse removes; Stop/SessionStart/
-    // SessionEnd clear (no subagent outlives its parent turn). Guarded by the
-    // lock because the gateway writes from a background task while the Agents
-    // panel reads from the UI thread.
+    // Running subagents keyed by "agent:{agent_id}" or "tool:{tool_use_id}" →
+    // subagent_type. SubagentStart/SubagentStop is the primary signal — with
+    // background subagents (CC 2.x default) the Task/Agent tool call returns
+    // immediately while the agent keeps running, so the PreToolUse/PostToolUse
+    // pair is kept only as a fallback for older CC versions without
+    // SubagentStart. Stop clears tool-keyed entries only (a background agent
+    // outlives its parent turn); SessionStart/SessionEnd clear everything.
+    // Guarded by the lock because the gateway writes from a background task
+    // while the Agents panel reads from the UI thread.
     private readonly System.Collections.Generic.Dictionary<string, string> _runningSubagents = new();
     private readonly object _runningSubagentsLock = new();
 
@@ -665,13 +690,33 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     private void TrackSubagents(HookEvent evt)
     {
         bool changed = false;
-        if (IsSubagentLaunchTool(evt.Tool) && evt.Type is "PreToolUse" or "PostToolUse")
+        if (evt.Type is "SubagentStart" or "SubagentStop")
+        {
+            var agentType = string.IsNullOrWhiteSpace(evt.AgentType) ? "general-purpose" : evt.AgentType!;
+            var key = $"agent:{evt.AgentId ?? agentType}";
+            lock (_runningSubagentsLock)
+            {
+                changed = evt.Type == "SubagentStart"
+                    ? _runningSubagents.TryAdd(key, agentType)
+                    // A Stop whose id doesn't match a Start (schema drift
+                    // between CC versions) still means one agent finished —
+                    // drop one agent-keyed entry rather than leak a pulse.
+                    // Only when the Stop names an agent type, though: CC also
+                    // fires internal SubagentStops (~5s after every turn's
+                    // Stop, empty agent_type, ids that never had a Start) for
+                    // its own sidechains, and treating those as "one agent
+                    // finished" evicted real running agents from the panel.
+                    : _runningSubagents.Remove(key)
+                      || (!string.IsNullOrWhiteSpace(evt.AgentType) && RemoveOneAgentEntry(evt.AgentType));
+            }
+        }
+        else if (IsSubagentLaunchTool(evt.Tool) && evt.Type is "PreToolUse" or "PostToolUse")
         {
             var agentType = ReadSubagentType(evt.ToolInput);
             // tool_use_id pairs launch/return exactly; without it fall back to the
             // type name — parallel same-type agents then collapse to one entry,
             // which is fine for a "who's working" pulse.
-            var key = evt.ToolUseId ?? $"type:{agentType}";
+            var key = $"tool:{evt.ToolUseId ?? agentType}";
             lock (_runningSubagentsLock)
             {
                 changed = evt.Type == "PreToolUse"
@@ -681,13 +726,44 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         }
         else if (evt.Type is "Stop" or "SessionStart" or "SessionEnd")
         {
+            // Turn end only closes the tool-pair fallback entries — background
+            // subagents keep running past Stop and are closed by SubagentStop.
+            // Session boundaries clear everything.
+            var clearAll = evt.Type is "SessionStart" or "SessionEnd";
             lock (_runningSubagentsLock)
             {
-                changed = _runningSubagents.Count > 0;
-                _runningSubagents.Clear();
+                if (clearAll)
+                {
+                    changed = _runningSubagents.Count > 0;
+                    _runningSubagents.Clear();
+                }
+                else
+                {
+                    foreach (var key in System.Linq.Enumerable.ToArray(_runningSubagents.Keys))
+                    {
+                        if (key.StartsWith("tool:", StringComparison.Ordinal))
+                            changed |= _runningSubagents.Remove(key);
+                    }
+                }
             }
         }
         if (changed) RunningAgentsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    // Caller holds _runningSubagentsLock. Removes the first agent-keyed entry,
+    // preferring one whose type matches; returns true if something was removed.
+    private bool RemoveOneAgentEntry(string? agentType)
+    {
+        string? fallback = null;
+        foreach (var kv in _runningSubagents)
+        {
+            if (!kv.Key.StartsWith("agent:", StringComparison.Ordinal)) continue;
+            if (!string.IsNullOrEmpty(agentType)
+                && string.Equals(kv.Value, agentType, StringComparison.OrdinalIgnoreCase))
+                return _runningSubagents.Remove(kv.Key);
+            fallback ??= kv.Key;
+        }
+        return fallback is not null && _runningSubagents.Remove(fallback);
     }
 
     /// <summary>
@@ -751,10 +827,11 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
 
             double rl5 = 0, rl7 = 0;
             string rl5Reset = string.Empty, rl7Reset = string.Empty;
+            DateTime? rl5ResetUtc = null;
             if (root.TryGetProperty("rate_limits", out var rl) && rl.ValueKind == System.Text.Json.JsonValueKind.Object)
             {
-                ReadRateLimit(rl, "five_hour", out rl5, out rl5Reset);
-                ReadRateLimit(rl, "seven_day", out rl7, out rl7Reset);
+                ReadRateLimit(rl, "five_hour", out rl5, out rl5Reset, out rl5ResetUtc);
+                ReadRateLimit(rl, "seven_day", out rl7, out rl7Reset, out _);
             }
 
             string outputStyle = string.Empty;
@@ -808,6 +885,7 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
                 CcLinesRemoved = linesRemoved;
                 CcRateLimit5hPercent = rl5;
                 CcRateLimit5hResetText = rl5Reset;
+                CcRateLimit5hResetUtc = rl5ResetUtc;
                 CcRateLimit7dPercent = rl7;
                 CcRateLimit7dResetText = rl7Reset;
                 CcOutputStyle = outputStyle;
@@ -858,10 +936,11 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static void ReadRateLimit(System.Text.Json.JsonElement rl, string name, out double pct, out string resetText)
+    private static void ReadRateLimit(System.Text.Json.JsonElement rl, string name, out double pct, out string resetText, out DateTime? resetUtc)
     {
         pct = 0;
         resetText = string.Empty;
+        resetUtc = null;
         if (!rl.TryGetProperty(name, out var period) || period.ValueKind != System.Text.Json.JsonValueKind.Object) return;
         if (period.TryGetProperty("used_percentage", out var up) && TryReadDouble(up, out var upv)) pct = upv;
         if (period.TryGetProperty("resets_at", out var ra) && TryReadDouble(ra, out var epoch))
@@ -870,11 +949,13 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
             // away, switch to short date so a weekly reset doesn't read as a time today.
             try
             {
-                var when = DateTimeOffset.FromUnixTimeSeconds((long)epoch).ToLocalTime();
+                var when = DateTimeOffset.FromUnixTimeSeconds((long)epoch);
+                resetUtc = when.UtcDateTime;
+                var local = when.ToLocalTime();
                 var delta = when - DateTimeOffset.Now;
                 resetText = delta.TotalHours >= 24
-                    ? when.ToString("MMM d HH:mm")
-                    : when.ToString("HH:mm");
+                    ? local.ToString("MMM d HH:mm")
+                    : local.ToString("HH:mm");
             }
             catch { resetText = string.Empty; }
         }
@@ -979,9 +1060,12 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
             "SessionStart"     => AttentionState.Idle,
             // Stop = assistant turn finished, ready for next user input.
             "Stop"             => AttentionState.Idle,
-            // SubagentStop fires when a Task subagent returns; main agent is
-            // still running, so treat it like activity.
-            "SubagentStop"     => AttentionState.Working,
+            // SubagentStart/SubagentStop say nothing about the *main* agent —
+            // background subagents outlive the turn, so a Stop-then-SubagentStop
+            // sequence must not flip an idle tab back to Working (it would stick,
+            // no follow-up event clears it). While the main agent is running its
+            // own Pre/PostToolUse traffic keeps the tab Working anyway.
+            "SubagentStop"     => (AttentionState?)null,
             // Notification = permission prompt or other user-attention signal.
             // Idle here is the right state for "needs user", the chrome treats
             // it the same as a finished turn (which is also "needs user").
@@ -1203,6 +1287,13 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
     /// </summary>
     public ConPtyConnection? GetCurrentConnection() => _control?.Connection;
 
+    /// <summary>
+    /// True while this tab's terminal is reparented into a <see cref="Views.PoppedOutWindow"/>.
+    /// A popped-out terminal is on screen even when it isn't the selected tab, so
+    /// <see cref="ShellViewModel.SyncConnectionThrottles"/> must not throttle its output.
+    /// </summary>
+    public bool IsPoppedOut { get; set; }
+
     public bool SendInput(string text, bool appendReturn = true)
     {
         var control = _control;
@@ -1229,6 +1320,9 @@ public sealed partial class TerminalTabViewModel : ObservableObject, IDisposable
         FocusTerminal(control);
         return true;
     }
+
+    /// <summary>Moves keyboard focus into this tab's terminal (deferred to Input priority).</summary>
+    public void FocusTerminal() => FocusTerminal(_control);
 
     // Move WPF keyboard focus to the terminal so a button-click that triggered
     // SendInput doesn't leave the originating button focused — otherwise the

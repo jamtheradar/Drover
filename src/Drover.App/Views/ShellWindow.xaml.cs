@@ -53,7 +53,7 @@ public partial class ShellWindow : Window
         // overlay is open we leave the event unhandled so terminal Escape still works.
         PreviewKeyDown += OnWindowPreviewKeyDown;
 
-        // Alt-modified shortcuts (Alt+E, Alt+P, ...) arrive as WM_SYSKEYDOWN. The
+        // Alt-modified shortcuts arrive as WM_SYSKEYDOWN. The
         // hosted ConPTY terminal is an HwndHost — native HWNDs sit outside WPF's
         // input pipeline and consume those messages before InputBindings run.
         // Hooking WM_SYSKEYDOWN at the HwndSource level lets us match configured
@@ -118,59 +118,24 @@ public partial class ShellWindow : Window
             vm.DashboardActive = false;
             vm.TokenomicsActive = false;
             vm.MemoryActive = false;
+            FocusSelectedTerminal();
             e.Handled = true;
             return;
         }
 
-        // Tab / Shift+Tab / arrow keys are intercepted by WPF's focus-traversal
-        // and directional-navigation logic (HwndHost.TranslateAccelerator) before
-        // they reach the terminal HWND, so Claude Code's Shift+Tab (cycle modes)
-        // and history-navigation arrows silently move WPF focus instead. Catch
-        // them at PreviewKeyDown — same pattern proven to work for Escape — and
-        // forward the corresponding VT byte sequence to the focused tab's PTY.
-        // Modified Tab (Ctrl/Alt) is left alone so app shortcuts keep working.
-        if (Keyboard.Modifiers != ModifierKeys.None &&
-            Keyboard.Modifiers != ModifierKeys.Shift)
-        {
-            return;
-        }
-
-        var seq = e.Key switch
-        {
-            Key.Tab => (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift ? "\x1b[Z" : "\t",
-            Key.Up => "\x1b[A",
-            Key.Down => "\x1b[B",
-            Key.Right => "\x1b[C",
-            Key.Left => "\x1b[D",
-            _ => null
-        };
-        if (seq is null) return;
-
-        var tab = ResolveFocusedTab();
-        if (tab is null) return;
-
-        if (tab.SendInput(seq, appendReturn: false))
-            e.Handled = true;
+        // Tab / arrow keys for the terminal are handled by DroverTerminal's own
+        // PreviewKeyDown, scoped to the terminal — so text boxes in panels keep
+        // their arrows and Tab still moves focus between WPF controls.
     }
 
-    /// <summary>
-    /// Walks up from the keyboard-focused element to find the
-    /// <see cref="TerminalTabView"/> (each terminal pane's wrapper) and
-    /// returns the bound <see cref="TerminalTabViewModel"/>. Falls back to
-    /// the shell's SelectedTab if no terminal is currently in the focus path
-    /// (e.g. focus is on a filter box).
-    /// </summary>
-    private TerminalTabViewModel? ResolveFocusedTab()
+    /// <summary>Puts keyboard focus back in the selected tab's terminal after
+    /// an overlay or panel closes, so the user can keep typing to Claude.</summary>
+    private void FocusSelectedTerminal()
     {
-        if (Keyboard.FocusedElement is DependencyObject d)
-        {
-            for (var cur = d; cur is not null; cur = System.Windows.Media.VisualTreeHelper.GetParent(cur))
-            {
-                if (cur is TerminalTabView tv && tv.DataContext is TerminalTabViewModel vm)
-                    return vm;
-            }
-        }
-        return (DataContext as ShellViewModel)?.SelectedTab;
+        var tab = (DataContext as ShellViewModel)?.SelectedTab;
+        if (tab is null) return;
+        Dispatcher.BeginInvoke(new System.Action(() => tab.FocusTerminal()),
+            System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private readonly System.Collections.Generic.List<KeyBinding> _shortcutBindings = new();
@@ -241,6 +206,7 @@ public partial class ShellWindow : Window
         Bind(sc.ToggleTaskPanel, ToggleTaskPanelHalfWidth);
         Bind(sc.ToggleFileExplorerPanel, ToggleFileExplorerPanelDefaultWidth);
         Bind(sc.ToggleKanbanPanel, ToggleKanbanPanelHalfWidth);
+        Bind(sc.ToggleSidebar, () => (DataContext as ShellViewModel)?.ToggleSidebar());
     }
 
     /// <summary>
@@ -253,7 +219,7 @@ public partial class ShellWindow : Window
         if (DataContext is not ShellViewModel vm) return;
         var willOpen = !vm.PlanPanelVisible;
         vm.PlanPanelVisible = willOpen;
-        if (!willOpen) return;
+        if (!willOpen) { FocusSelectedTerminal(); return; }
 
         var halfWidth = ActualWidth * 0.5;
         if (halfWidth < 240) halfWidth = 240;
@@ -266,7 +232,7 @@ public partial class ShellWindow : Window
         if (DataContext is not ShellViewModel vm) return;
         var willOpen = !vm.TaskPanelVisible;
         vm.TaskPanelVisible = willOpen;
-        if (!willOpen) return;
+        if (!willOpen) { FocusSelectedTerminal(); return; }
 
         var halfWidth = ActualWidth * 0.5;
         if (halfWidth < 240) halfWidth = 240;
@@ -280,10 +246,10 @@ public partial class ShellWindow : Window
     /// </summary>
     private void ToggleKanbanPanelHalfWidth()
     {
-        if (DataContext is not ShellViewModel vm) return;
+        if (DataContext is not ShellViewModel vm || !vm.WorkflowFeaturesEnabled) return;
         var willOpen = !vm.KanbanPanelVisible;
         vm.KanbanPanelVisible = willOpen;
-        if (!willOpen) return;
+        if (!willOpen) { FocusSelectedTerminal(); return; }
 
         var w = ActualWidth * 0.6;
         if (w < 480) w = 480;
@@ -300,7 +266,7 @@ public partial class ShellWindow : Window
         if (DataContext is not ShellViewModel vm) return;
         var willOpen = !vm.FileExplorerPanelVisible;
         vm.FileExplorerPanelVisible = willOpen;
-        if (!willOpen) return;
+        if (!willOpen) { FocusSelectedTerminal(); return; }
 
         var width = ActualWidth * 0.35;
         if (width < 240) width = 240;
@@ -406,7 +372,8 @@ public partial class ShellWindow : Window
 
     private void ShowCheatSheet()
     {
-        var win = new CheatSheetWindow { Owner = this };
+        _settings ??= (DataContext as ShellViewModel)?.Settings;
+        var win = new CheatSheetWindow(_settings?.Current.Shortcuts) { Owner = this };
         win.Show();
     }
 
@@ -614,7 +581,7 @@ public partial class ShellWindow : Window
         }
     }
 
-    private void BringSelfForward()
+    public void BringSelfForward()
     {
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Topmost = true;
@@ -743,6 +710,27 @@ public partial class ShellWindow : Window
             vm.OpenTabFolder(tab);
     }
 
+    private void OpenTerminal_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is System.Windows.Controls.MenuItem mi && mi.Tag is ViewModels.TerminalTabViewModel tab)
+            vm.OpenTabTerminal(tab);
+    }
+
+    private void OpenProjectTerminal_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is System.Windows.Controls.MenuItem mi && mi.Tag is Models.ProjectDefinition project)
+            vm.OpenTerminalAt(project.Path);
+    }
+
+    private void CreateClaudeDefaults_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        if (sender is System.Windows.Controls.MenuItem mi && mi.Tag is Models.ProjectDefinition project)
+            vm.CreateClaudeDefaultsForProject(project);
+    }
+
     private void InstallHook_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not ShellViewModel vm) return;
@@ -768,6 +756,13 @@ public partial class ShellWindow : Window
         var dlg = new AddProjectDialog { Owner = this };
         if (dlg.ShowDialog() == true && dlg.Result is not null)
             vm.AddProject(dlg.Result);
+    }
+
+    private void OpenFolderPicker_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ShellViewModel vm) return;
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Open folder in Drover" };
+        if (dlg.ShowDialog(this) == true) vm.OpenFolder(dlg.FolderName);
     }
 
     private void BulkImport_Click(object sender, RoutedEventArgs e)
@@ -905,9 +900,16 @@ public partial class ShellWindow : Window
         var isCodex = project.Kind == Models.ProjectKind.Codex;
         var isGemini = project.Kind == Models.ProjectKind.Gemini;
 
+        var workflow = (DataContext as ShellViewModel)?.WorkflowFeaturesEnabled ?? true;
+
         foreach (var child in cm.Items)
         {
             if (child is not System.Windows.Controls.MenuItem mi) continue;
+            if (!workflow && mi.Header is "Initialize specs" or "Enhance spec template" or "Open .drover folder")
+            {
+                mi.Visibility = Visibility.Collapsed;
+                continue;
+            }
             if (mi.Name == "InstallHookProjectMenuItem")
             {
                 mi.Visibility = (isCodex || isGemini) ? Visibility.Collapsed : Visibility.Visible;
@@ -982,6 +984,9 @@ public partial class ShellWindow : Window
     private void ShowSpecsPanel_Click(object sender, RoutedEventArgs e) =>
         OpenProjectAndShowPanel(sender, vm => vm.SpecsPanelVisible = true);
 
+    private void ShowWorkflowPanel_Click(object sender, RoutedEventArgs e) =>
+        OpenProjectAndShowPanel(sender, vm => vm.WorkflowPanelVisible = true);
+
     private void ShowKanbanPanel_Click(object sender, RoutedEventArgs e) =>
         OpenProjectAndShowPanel(sender, vm => vm.KanbanPanelVisible = true);
 
@@ -1055,6 +1060,17 @@ public partial class ShellWindow : Window
 
         originPanel.Children.Remove(terminal);
         var popped = new PoppedOutWindow(tab, terminal, originPanel) { Owner = this };
+
+        // A popped-out terminal is on screen regardless of which tab is selected, so it
+        // must keep the unthrottled output rate until it re-attaches.
+        tab.IsPoppedOut = true;
+        popped.Closed += (_, _) =>
+        {
+            tab.IsPoppedOut = false;
+            vm.SyncConnectionThrottles();
+        };
+        vm.SyncConnectionThrottles();
+
         popped.Show();
         vm.StatusText = $"popped out: {tab.Title}";
     }

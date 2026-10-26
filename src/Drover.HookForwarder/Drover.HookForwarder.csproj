@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- Claude Code runs this once per hook event (every tool call), synchronously.
+	     Everything here is about start-up time: no package references, no HttpClient,
+	     invariant globalization. Replaces a pwsh.exe launch that cost several hundred
+	     ms per event. The BCL is already ReadyToRun and our own code is a few methods,
+	     so app-level R2R isn't worth a RID-specific output path. -->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<LangVersion>latest</LangVersion>
+		<PlatformTarget>x64</PlatformTarget>
+		<RootNamespace>Drover.HookForwarder</RootNamespace>
+		<AssemblyName>drover-hook</AssemblyName>
+		<InvariantGlobalization>true</InvariantGlobalization>
+		<UseSystemResourceKeys>true</UseSystemResourceKeys>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	</PropertyGroup>
+
+</Project>

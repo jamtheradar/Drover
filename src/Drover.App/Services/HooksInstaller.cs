@@ -82,6 +82,7 @@ public sealed class HooksInstaller
         "PostToolUse",
         "Notification",
         "Stop",
+        "SubagentStart",
         "SubagentStop",
         "SessionStart",
         "SessionEnd",
@@ -89,8 +90,15 @@ public sealed class HooksInstaller
         "TaskCompleted",
     };
 
+    private static readonly string[] ForwarderFiles =
+        { "drover-hook.exe", "drover-hook.dll", "drover-hook.runtimeconfig.json" };
+
     public string ScriptPath { get; }
     public string StatusScriptPath { get; }
+    /// <summary>Native forwarder (Drover.HookForwarder) staged under the hooks dir. Preferred
+    /// over the pwsh scripts: Claude Code runs a hook synchronously on every tool call, and
+    /// a pwsh cold start per call was a visible slowdown — even outside Drover.</summary>
+    public string ForwarderPath { get; }
     public string SettingsPath { get; }
     public string StatusBackupPath { get; }
 
@@ -101,6 +109,7 @@ public sealed class HooksInstaller
         Directory.CreateDirectory(hooksDir);
         ScriptPath = Path.Combine(hooksDir, "drover-hook.ps1");
         StatusScriptPath = Path.Combine(hooksDir, "drover-statusline.ps1");
+        ForwarderPath = Path.Combine(hooksDir, "forwarder", "drover-hook.exe");
         StatusBackupPath = Path.Combine(appData, "Drover", "statusline-backup.json");
 
         var home = Environment.GetEnvironmentVariable("USERPROFILE")
@@ -120,6 +129,10 @@ public sealed class HooksInstaller
         {
             // Nothing to do if the file doesn't exist. Don't materialise it.
             if (!File.Exists(SettingsPath)) return true;
+            // Only rewrite when there's actually a Drover entry to strip. A blind
+            // re-serialise on every launch dropped comments, reformatted the
+            // user's file and could race Claude Code writing the same file.
+            if (!ContainsDroverHook(SettingsPath) && !ContainsPath(SettingsPath, StatusScriptPath)) return true;
             // MergeIntoFile with everything-off removes Drover entries and
             // restores any backed-up third-party statusLine, leaving non-Drover
             // hooks intact. requireParentDir=true means we won't create
@@ -145,8 +158,12 @@ public sealed class HooksInstaller
         if (string.IsNullOrWhiteSpace(projectPath) || !Directory.Exists(projectPath)) return false;
         try
         {
-            if (hooksEnabled) EnsureScript();
-            if (takeOverStatusLine) EnsureStatusScript();
+            var useForwarder = EnsureForwarder();
+            if (!useForwarder)
+            {
+                if (hooksEnabled) EnsureScript();
+                if (takeOverStatusLine) EnsureStatusScript();
+            }
             var dotClaude = Path.Combine(projectPath, ".claude");
             Directory.CreateDirectory(dotClaude);
             var target = Path.Combine(dotClaude, "settings.local.json");
@@ -175,18 +192,67 @@ public sealed class HooksInstaller
             || ContainsDroverHook(Path.Combine(dotClaude, "settings.local.json"));
     }
 
-    private bool ContainsDroverHook(string settingsPath)
+    private bool ContainsDroverHook(string settingsPath) =>
+        ContainsPath(settingsPath, ScriptPath) || ContainsPath(settingsPath, ForwarderPath.Replace('\\', '/'));
+
+    /// <summary>
+    /// Re-installs a project whose hooks still point at the legacy pwsh forwarder so it
+    /// picks up the native one, keeping its statusLine takeover state. Call before a tab
+    /// launches — Claude Code reads hook config at session start. No-op otherwise.
+    /// </summary>
+    public void UpgradeLegacyProject(string projectPath, bool hooksEnabled, bool idleHookEnabled)
+    {
+        if (string.IsNullOrWhiteSpace(projectPath)) return;
+        var local = Path.Combine(projectPath, ".claude", "settings.local.json");
+        if (!ContainsPath(local, ScriptPath) || !EnsureForwarder()) return;
+        var statusTaken = ContainsPath(local, StatusScriptPath);
+        TryInstallProject(projectPath, statusTaken, hooksEnabled, idleHookEnabled);
+    }
+
+    /// <summary>
+    /// Stages the native forwarder from <c>hookforwarder\</c> next to Drover.App.exe into
+    /// <see cref="ForwarderPath"/>'s folder (stable across updates and dev builds). Returns
+    /// true when a usable forwarder is in place; false → fall back to the pwsh scripts.
+    /// </summary>
+    public bool EnsureForwarder()
+    {
+        var sourceDir = Path.Combine(AppContext.BaseDirectory, "hookforwarder");
+        var targetDir = Path.GetDirectoryName(ForwarderPath)!;
+        if (!File.Exists(Path.Combine(sourceDir, ForwarderFiles[0])))
+            return File.Exists(ForwarderPath);
+        try
+        {
+            Directory.CreateDirectory(targetDir);
+            foreach (var name in ForwarderFiles)
+            {
+                var src = new FileInfo(Path.Combine(sourceDir, name));
+                var dst = new FileInfo(Path.Combine(targetDir, name));
+                if (!src.Exists) return File.Exists(ForwarderPath);
+                if (dst.Exists && dst.Length == src.Length && dst.LastWriteTimeUtc >= src.LastWriteTimeUtc) continue;
+                try { src.CopyTo(dst.FullName, overwrite: true); }
+                catch (IOException) when (dst.Exists) { /* in use by a running hook — keep the current copy */ }
+            }
+            return File.Exists(ForwarderPath);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("Hooks", $"Staging hook forwarder failed: {ex.Message}");
+            return File.Exists(ForwarderPath);
+        }
+    }
+
+    private static bool ContainsPath(string settingsPath, string path)
     {
         if (!File.Exists(settingsPath)) return false;
         try
         {
             var json = File.ReadAllText(settingsPath);
             // JSON serialisation escapes backslashes (C:\foo → C:\\foo) so a literal
-            // substring search for ScriptPath misses on Windows. Match against both
+            // substring search for the path misses on Windows. Match against both
             // forms so manually-edited (single-backslash) and serialised (double)
             // entries are both detected.
-            var escaped = ScriptPath.Replace("\\", "\\\\");
-            return json.Contains(ScriptPath, StringComparison.OrdinalIgnoreCase)
+            var escaped = path.Replace("\\", "\\\\");
+            return json.Contains(path, StringComparison.OrdinalIgnoreCase)
                 || json.Contains(escaped, StringComparison.OrdinalIgnoreCase);
         }
         catch
@@ -281,9 +347,10 @@ public sealed class HooksInstaller
             rootObj["hooks"] = hooks;
         }
 
+        var useForwarder = File.Exists(ForwarderPath);
         if (hooks is not null)
         {
-            var command = BuildCommand(ScriptPath);
+            var command = useForwarder ? BuildForwarderCommand(statusLine: false) : BuildCommand(ScriptPath);
             foreach (var evt in EventNames)
             {
                 // Stop is the "idle" event — gated by the idle-hook switch.
@@ -297,9 +364,11 @@ public sealed class HooksInstaller
 
         // statusLine takeover is independent of event hooks — it has its own
         // forwarder and slot in CC's settings.
-        UpsertStatusLine(rootObj, BuildCommand(StatusScriptPath), takeOverStatusLine);
+        UpsertStatusLine(rootObj,
+            useForwarder ? BuildForwarderCommand(statusLine: true) : BuildCommand(StatusScriptPath),
+            takeOverStatusLine);
 
-        AtomicFile.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        AtomicFile.WriteAllText(path, root.ToJsonString(SettingsJson.Indented));
     }
 
     /// <summary>
@@ -322,7 +391,8 @@ public sealed class HooksInstaller
         var existing = root["statusLine"] as JsonObject;
         var existingCmd = existing?["command"]?.GetValue<string>();
         var isOurs = !string.IsNullOrEmpty(existingCmd)
-                     && existingCmd!.Contains(StatusScriptPath, StringComparison.OrdinalIgnoreCase);
+                     && (existingCmd!.Contains(StatusScriptPath, StringComparison.OrdinalIgnoreCase)
+                         || IsForwarderCommand(existingCmd));
 
         if (takeOver)
         {
@@ -337,7 +407,7 @@ public sealed class HooksInstaller
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(StatusBackupPath)!);
                         AtomicFile.WriteAllText(StatusBackupPath,
-                            existing.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                            existing.ToJsonString(SettingsJson.Indented));
                     }
                     catch { /* non-fatal — worst case the user re-installs ccstatusline manually */ }
                 }
@@ -430,10 +500,25 @@ public sealed class HooksInstaller
         {
             if (h is not JsonObject ho) continue;
             var cmd = ho["command"]?.GetValue<string>();
-            if (!string.IsNullOrEmpty(cmd) && cmd!.Contains(ScriptPath, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(cmd)) continue;
+            if (cmd!.Contains(ScriptPath, StringComparison.OrdinalIgnoreCase) || IsForwarderCommand(cmd))
                 return true;
         }
         return false;
+    }
+
+    // The forwarder command uses forward slashes (see BuildForwarderCommand); match either form.
+    private bool IsForwarderCommand(string cmd) =>
+        cmd.Contains(ForwarderPath, StringComparison.OrdinalIgnoreCase)
+        || cmd.Contains(ForwarderPath.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+
+    private string BuildForwarderCommand(bool statusLine)
+    {
+        // Forward slashes: CC runs hook commands through Git Bash (or PowerShell when
+        // Git Bash is absent) and a quoted C:/… path is valid in both. The forwarder
+        // reads DROVER_* itself, so no shell-specific env syntax is needed.
+        var exe = ForwarderPath.Replace('\\', '/');
+        return statusLine ? $"\"{exe}\" --statusline" : $"\"{exe}\"";
     }
 
     private static string BuildCommand(string scriptPath)

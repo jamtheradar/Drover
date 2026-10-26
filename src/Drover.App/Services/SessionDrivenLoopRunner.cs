@@ -60,7 +60,11 @@ public sealed class SessionDrivenLoopRunner : ILoopRunner
             return;
         }
 
-        var filenames = string.Join(", ", specs.Select(s => s.FileName));
+        // Per-spec agent assignments ride along as an `@name` suffix, e.g.
+        // "0015-foo.md @code-reviewer, 0016-bar.md". Kept as one readable
+        // comma list rather than JSON — the coordinator prompt is markdown a
+        // user reads in their terminal. See prompt-loop-batch.md.
+        var filenames = string.Join(", ", specs.Select(FormatSpecEntry));
         string prompt;
         try
         {
@@ -184,6 +188,19 @@ public sealed class SessionDrivenLoopRunner : ILoopRunner
         {
             session.Output -= OnOutput;
         }
+    }
+
+    /// <summary>
+    /// Formats one entry for the <c>{{SPEC_FILENAMES}}</c> list: the bare
+    /// filename, plus <c>" @agent"</c> when the spec assigns one. Whitespace
+    /// in an agent name would break the single-token shape the coordinator
+    /// prompt parses, so such a value is treated as unassigned.
+    /// </summary>
+    private static string FormatSpecEntry(SpecFile spec)
+    {
+        var agent = spec.Agent?.Trim() ?? string.Empty;
+        if (agent.Length == 0 || agent.Any(char.IsWhiteSpace)) return spec.FileName;
+        return $"{spec.FileName} @{agent.TrimStart('@')}";
     }
 
     private static string SpecIdFor(System.Collections.Generic.IReadOnlyList<SpecFile> specs, string fileName)

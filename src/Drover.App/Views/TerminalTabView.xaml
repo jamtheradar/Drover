@@ -300,12 +300,17 @@
                     <!-- Hook badge (moved to right cluster). -->
                     <Border CornerRadius="3" Padding="6,2" Margin="0,0,8,0"
                             VerticalAlignment="Center">
+                        <Border.InputBindings>
+                            <MouseBinding MouseAction="LeftClick" Command="{Binding RequestInstallHooksCommand}" />
+                        </Border.InputBindings>
                         <Border.Style>
                             <Style TargetType="Border">
                                 <Setter Property="Background" Value="#3a2a2a" />
-                                <Setter Property="ToolTip" Value="Drover hooks aren't wired into this project yet — right-click the tab → 'Install Drover hook in project' to enable lifecycle events." />
+                                <Setter Property="Cursor" Value="Hand" />
+                                <Setter Property="ToolTip" Value="Drover hooks aren't enabled for this project — click to enable (tab flash on finish/permission, live tool/model/cost). Applies to new sessions." />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding HooksInstalled}" Value="True">
+                                        <Setter Property="Cursor" Value="Arrow" />
                                         <Setter Property="Background" Value="#2c3a2c" />
                                         <Setter Property="ToolTip" Value="Drover hooks are installed for this project (lifecycle events flow through the loopback listener)." />
                                     </DataTrigger>

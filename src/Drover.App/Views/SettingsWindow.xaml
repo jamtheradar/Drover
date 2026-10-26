@@ -36,6 +36,11 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" MinWidth="130" />
@@ -76,18 +81,33 @@
                                    ToolTip="Override for the `gemini` command (Google Gemini CLI). Leave blank to rely on PATH." />
                         <Button    Grid.Row="5" Grid.Column="2" Content="Browse…" Padding="10,4" Margin="0,0,0,8" Click="BrowseGemini_Click" />
 
-                        <CheckBox  Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" x:Name="StartupBox"
-                                   Content="Start Drover when I sign in to Windows"
+                        <CheckBox  Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3" x:Name="DisableMouseClicksBox"
+                                   Content="Disable mouse clicks in Claude sessions (keyboard-only selection)"
                                    Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
                         <TextBlock Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="3"
-                                   Text="Adds a per-user entry under HKCU\…\Run pointing at the current Drover.exe. No admin needed."
+                                   Text="Sets CLAUDE_CODE_DISABLE_MOUSE_CLICKS=1 on Claude tabs so a click can't select the wrong option while the terminal is mid-redraw. Mouse-wheel scrolling still works. Applies to newly opened tabs."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="20,0,0,12" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="3"
+                        <CheckBox  Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="3" x:Name="StartupBox"
+                                   Content="Start Drover when I sign in to Windows"
+                                   Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
+                        <TextBlock Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="3"
+                                   Text="Adds a per-user entry under HKCU\…\Run pointing at the current Drover.exe. No admin needed."
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                   Margin="20,0,0,12" TextWrapping="Wrap" />
+                        <CheckBox  Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="3" x:Name="ShellIntegrationBox"
+                                   Content="Shell integration: “Open in Drover” in Explorer and a `drover` command"
+                                   Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
+                        <TextBlock Grid.Row="11" Grid.Column="0" Grid.ColumnSpan="3"
+                                   Text="Right-click any folder (or folder background) ▸ Open in Drover, or run `drover .` / `drover C:\repo` from any terminal. Opens a tab in the running Drover. Per-user, no admin needed."
+                                   Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                   Margin="20,0,0,12" TextWrapping="Wrap" />
+
+                        <TextBlock Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="Global environment (KEY=VALUE per line — applied before per-project env)"
                                    Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
-                        <TextBox   Grid.Row="9" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBox   Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="3"
                                    x:Name="GlobalEnvBox"
                                    MinHeight="80"
                                    AcceptsReturn="True"
@@ -95,13 +115,13 @@
                                    FontFamily="Cascadia Code, Consolas"
                                    Padding="4" Margin="0,0,0,8" />
 
-                        <Separator Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,4,0,8" />
+                        <Separator Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,4,0,8" />
 
-                        <TextBlock Grid.Row="11" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="Session log retention" Foreground="{StaticResource Chrome.Text}"
                                    FontWeight="SemiBold" Margin="0,0,0,6" />
 
-                        <Grid Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,4">
+                        <Grid Grid.Row="16" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" MinWidth="130" />
                                 <ColumnDefinition Width="80" />
@@ -118,22 +138,36 @@
                             <TextBox   Grid.Column="4" x:Name="LogBytesBox" Padding="4" />
                             <TextBlock Grid.Column="5" Text="MB" Foreground="{StaticResource Chrome.TextMuted}" VerticalAlignment="Center" Margin="6,0,0,0" />
                         </Grid>
-                        <TextBlock Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="17" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="0 disables the cap. Pruning runs each time a tab opens — older files are deleted first."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="0,0,0,8" TextWrapping="Wrap" />
 
-                        <TextBlock Grid.Row="14" Grid.Column="0" Text="Capture level"
+                        <TextBlock Grid.Row="18" Grid.Column="0" Text="Capture level"
                                    Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,4" />
-                        <ComboBox  Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="2" x:Name="LogLevelBox" Margin="0,0,0,4" Padding="4">
+                        <ComboBox  Grid.Row="18" Grid.Column="1" Grid.ColumnSpan="2" x:Name="LogLevelBox" Margin="0,0,0,4" Padding="4">
                             <ComboBoxItem Tag="Off" Content="Off — no log files" />
                             <ComboBoxItem Tag="Transcript" Content="Transcript — clean .transcript.md only (default)" />
                             <ComboBoxItem Tag="Full" Content="Full — raw VT trace + transcript" />
                         </ComboBox>
-                        <TextBlock Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="3"
+                        <TextBlock Grid.Row="19" Grid.Column="0" Grid.ColumnSpan="3"
                                    Text="Transcript captures user/assistant pairs from CC's hook stream — readable, shareable. Full also writes the raw terminal trace; only useful for diagnosing rendering or replay issues."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="0,0,0,4" TextWrapping="Wrap" />
+
+                        <StackPanel Grid.Row="20" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,8,0,0">
+                            <Separator Margin="0,0,0,8" />
+                            <TextBlock Text="Layout" Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <CheckBox x:Name="ShowTopBarBox"
+                                      Content="Show session usage bar at the top"
+                                      Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
+                            <CheckBox x:Name="WorkflowFeaturesBox"
+                                      Content="Spec workflow features (Specs, Workflow and Kanban panels, loop runner)"
+                                      Foreground="{StaticResource Chrome.Text}" Margin="0,4,0,4" />
+                            <TextBlock Text="The plan → tasks → specs → loop pipeline. Off by default for new installs; turning it off only hides the UI — nothing in specs/ or .drover/ is touched. The project sidebar toggles with Ctrl+Shift+B (Shortcuts tab)."
+                                       Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
+                                       Margin="20,0,0,12" TextWrapping="Wrap" />
+                        </StackPanel>
                     </Grid>
                 </ScrollViewer>
             </TabItem>
@@ -189,7 +223,7 @@
                         <TextBlock Text="Event hooks"
                                    Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold"
                                    Margin="0,0,0,4" />
-                        <TextBlock Text="Drover registers hooks in ~/.claude/settings.json so Claude Code POSTs lifecycle events back to it. Entries are removed when disabled."
+                        <TextBlock Text="Drover hooks are per project: they live in each project's .claude/settings.local.json and are offered when you first open a project (or enabled from the tab's “hook off” badge). Your global ~/.claude/settings.json is never touched. Changes apply to newly opened sessions."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="0,0,0,8" TextWrapping="Wrap" />
 
@@ -197,7 +231,7 @@
                             <CheckBox x:Name="HooksEnabledBox"
                                       Content="Enable Claude Code hooks"
                                       Foreground="{StaticResource Chrome.Text}" />
-                            <TextBlock Text="Master switch for event hooks. When off, Drover removes its hook entries from ~/.claude/settings.json and stops driving attention state from CC events. The OSC scraper still runs as a fallback."
+                            <TextBlock Text="Master switch for event hooks. When off, Drover stops offering and upgrading project hooks and stops driving attention state from CC events. The OSC scraper still runs as a fallback."
                                        Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                        Margin="20,2,0,0" TextWrapping="Wrap" />
                         </StackPanel>
@@ -225,7 +259,7 @@
                         <TextBlock Text="StatusLine integration"
                                    Foreground="{StaticResource Chrome.Text}" FontWeight="SemiBold"
                                    Margin="0,0,0,4" />
-                        <TextBlock Text="Independent of event hooks — uses its own slot in ~/.claude/settings.json."
+                        <TextBlock Text="Independent of event hooks — uses its own statusLine slot in the project's .claude/settings.local.json."
                                    Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                    Margin="0,0,0,8" TextWrapping="Wrap" />
 
@@ -249,7 +283,7 @@
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0"
-                               Text="Format: Ctrl+Shift+P, Ctrl+Shift+F, F2 — restart not required."
+                               Text="Format: Ctrl+Shift+P, Ctrl+,  F2 — restart not required. Keep to Ctrl+Shift+letter or F-keys: bare Ctrl+letter and Alt+letter belong to Claude Code, and you'll be warned on save if a binding shadows one."
                                Foreground="{StaticResource Chrome.TextMuted}" FontSize="11"
                                Margin="0,0,0,8" TextWrapping="Wrap" />
 
@@ -258,6 +292,8 @@
                                   HorizontalScrollBarVisibility="Disabled">
                         <Grid Margin="0,0,8,0">
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -303,6 +339,12 @@
 
                             <TextBlock Grid.Row="9" Grid.Column="0" Text="Toggle file explorer" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
                             <TextBox   Grid.Row="9" Grid.Column="1" x:Name="ScFileExplorerPanel" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Toggle kanban board" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="10" Grid.Column="1" x:Name="ScKanbanPanel" Margin="0,0,0,6" Padding="4" />
+
+                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Toggle project sidebar" Foreground="{StaticResource Chrome.Text}" VerticalAlignment="Center" Margin="0,0,12,6"/>
+                            <TextBox   Grid.Row="11" Grid.Column="1" x:Name="ScSidebar" Margin="0,0,0,6" Padding="4" />
                         </Grid>
                     </ScrollViewer>
 

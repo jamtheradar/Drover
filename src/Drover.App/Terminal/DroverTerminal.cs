@@ -113,6 +113,40 @@ public class DroverTerminal : UserControl
         Focusable = true;
         GotFocus += (_, _) => Terminal.Focus();
         Terminal.Loaded += OnTerminalLoaded;
+        PreviewKeyDown += OnNavigationKeyDown;
+    }
+
+    /// <summary>
+    /// Tab / Shift+Tab / arrows (bare or Shift-modified) are claimed by WPF's
+    /// focus-traversal and directional-navigation logic before they reach the
+    /// terminal HWND, so Claude Code's Shift+Tab (cycle modes) and history arrows
+    /// would move WPF focus instead. Catch them here — scoped to this control, so
+    /// it works in the shell and in a PoppedOutWindow, and never steals keys from
+    /// text boxes elsewhere — and write the VT sequence (with xterm modifier
+    /// parameter for Shift+arrows) straight to the PTY. Ctrl/Alt combos are left
+    /// to the renderer and app shortcuts.
+    /// </summary>
+    private void OnNavigationKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Handled || Connection is not { } pty) return;
+        var mods = Keyboard.Modifiers;
+        if (mods != ModifierKeys.None && mods != ModifierKeys.Shift) return;
+        var shift = mods == ModifierKeys.Shift;
+
+        string? seq = e.Key switch
+        {
+            Key.Tab => shift ? "\x1b[Z" : "\t",
+            Key.Up => shift ? "\x1b[1;2A" : "\x1b[A",
+            Key.Down => shift ? "\x1b[1;2B" : "\x1b[B",
+            Key.Right => shift ? "\x1b[1;2C" : "\x1b[C",
+            Key.Left => shift ? "\x1b[1;2D" : "\x1b[D",
+            _ => null
+        };
+        if (seq is null) return;
+
+        try { pty.WriteToTerm(seq.AsSpan()); }
+        catch { return; }
+        e.Handled = true;
     }
 
     private void OnTerminalLoaded(object sender, RoutedEventArgs e)
@@ -163,7 +197,7 @@ public class DroverTerminal : UserControl
     private void TryInstallDropHook()
     {
         if (_dropHook is not null) return;
-        _dropHook = TerminalDropHook.TryInstall(Terminal, OnFilesDropped);
+        _dropHook = TerminalDropHook.TryInstall(Terminal, PastePaths);
         if (_dropHook is null)
         {
             // HwndHost wasn't realized yet — retry on the next render frame.
@@ -172,7 +206,12 @@ public class DroverTerminal : UserControl
         }
     }
 
-    private void OnFilesDropped(string[] paths)
+    /// <summary>
+    /// Writes quoted, space-separated paths to the PTY as one bracketed paste.
+    /// Used by file drag-drop and by <c>ClipboardIntegration</c> for pasted
+    /// images / Explorer-copied files — Claude Code attaches image paths it sees.
+    /// </summary>
+    public void PastePaths(string[] paths)
     {
         if (Connection is not { } pty || paths.Length == 0) return;
 

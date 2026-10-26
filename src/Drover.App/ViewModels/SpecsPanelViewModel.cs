@@ -60,6 +60,7 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
     private readonly ILoopConfigService _loopConfig;
     private readonly ITemplateService _templateService;
     private readonly SpecWatcher _watcher;
+    private readonly AgentCatalog _agents;
     private readonly Dispatcher _dispatcher;
 
     /// <summary>Active tab the panel is bound to. Drives both project root
@@ -98,6 +99,11 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
 
     public ObservableCollection<SpecRow> Specs { get; } = new();
 
+    /// <summary>Subagents discoverable for the active project. Rebuilt on tab
+    /// change and whenever <see cref="AgentCatalog"/> reports a change - the
+    /// catalog's file watchers mean the set moves without a tab switch.</summary>
+    public ObservableCollection<AgentDefinition> AvailableAgents { get; } = new();
+
     public IRelayCommand RunLoopDefaultCommand { get; }
     public IRelayCommand RunLoopDroverCommand { get; }
     public IRelayCommand RunLoopSessionCommand { get; }
@@ -106,28 +112,43 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
     public IRelayCommand StopLoopCommand { get; }
     public IRelayCommand RefreshCommand { get; }
 
+    /// <summary>Runs a single row, ignoring the checkbox selection entirely
+    /// (and leaving it untouched), in the project's default loop mode.</summary>
+    public RelayCommand<SpecRow> RunSpecCommand { get; }
+
+    /// <summary>Runs a single row against a chosen agent. Drover-driven only -
+    /// see <see cref="DroverDrivenLoopRunner"/>'s agentOverride remarks. The
+    /// choice is per-run: nothing is written to the spec file.</summary>
+    public RelayCommand<SpecDispatchArg> DispatchSpecToAgentCommand { get; }
+
     private CancellationTokenSource? _cts;
 
     public SpecsPanelViewModel(
         IPromptLibrary prompts,
         ILoopConfigService loopConfig,
-        ITemplateService templateService)
+        ITemplateService templateService,
+        AgentCatalog agents)
     {
         _prompts = prompts;
         _loopConfig = loopConfig;
         _templateService = templateService;
+        _agents = agents;
         _dispatcher = System.Windows.Application.Current?.Dispatcher
                       ?? Dispatcher.CurrentDispatcher;
         _watcher = new SpecWatcher();
         _watcher.Changed += (_, _) => _dispatcher.BeginInvoke(new System.Action(Reload));
+        // AgentCatalog raises on a background thread (its debounce timer callback).
+        _agents.Changed += (_, _) => _dispatcher.BeginInvoke(new System.Action(RebuildAgents));
 
-        RunLoopDefaultCommand = new RelayCommand(() => StartLoop(DefaultMode), () => CanRunLoop(DefaultMode));
-        RunLoopDroverCommand = new RelayCommand(() => StartLoop(LoopMode.Drover), () => CanRunLoop(LoopMode.Drover));
-        RunLoopSessionCommand = new RelayCommand(() => StartLoop(LoopMode.Session), () => CanRunLoop(LoopMode.Session));
+        RunLoopDefaultCommand = new RelayCommand(() => StartLoopFromSelection(DefaultMode), () => CanRunLoop(DefaultMode));
+        RunLoopDroverCommand = new RelayCommand(() => StartLoopFromSelection(LoopMode.Drover), () => CanRunLoop(LoopMode.Drover));
+        RunLoopSessionCommand = new RelayCommand(() => StartLoopFromSelection(LoopMode.Session), () => CanRunLoop(LoopMode.Session));
         SetDefaultDroverCommand = new RelayCommand(() => SetDefault(LoopMode.Drover));
         SetDefaultSessionCommand = new RelayCommand(() => SetDefault(LoopMode.Session));
         StopLoopCommand = new RelayCommand(StopLoop, () => IsLoopRunning);
         RefreshCommand = new RelayCommand(Reload);
+        RunSpecCommand = new RelayCommand<SpecRow>(RunSpec, CanRunSingle);
+        DispatchSpecToAgentCommand = new RelayCommand<SpecDispatchArg>(DispatchSpecToAgent, CanDispatch);
     }
 
     public void OnTabChanged(TerminalTabViewModel? tab)
@@ -144,6 +165,7 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
             SessionModeDisabledTooltip = string.Empty;
             IsPrimaryRunLoopBlocked = false;
             PrimaryRunLoopTooltip = "Run loop using the project default mode";
+            AvailableAgents.Clear();
             _watcher.Stop();
             UpdateButtonLabel();
             RaiseCommandStates();
@@ -162,8 +184,18 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         UpdatePrimaryRunLoopState();
         UpdateButtonLabel();
         _watcher.Watch(tab.Project.Path);
+        RebuildAgents();
         Reload();
         RaiseCommandStates();
+    }
+
+    /// <summary>Re-reads the agent catalog for the active project. Cheap
+    /// (in-memory maps behind the catalog) and called on every catalog change,
+    /// so the row menu never needs to cache.</summary>
+    private void RebuildAgents()
+    {
+        AvailableAgents.Clear();
+        foreach (var a in _agents.ForProject(_tab?.Project.Path)) AvailableAgents.Add(a);
     }
 
     private void UpdatePrimaryRunLoopState()
@@ -237,16 +269,48 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         }
     }
 
-    private void StartLoop(LoopMode mode)
+    private bool CanRunSingle(SpecRow? row) => row is not null && _tab is not null && !IsLoopRunning;
+
+    private bool CanDispatch(SpecDispatchArg? arg) => arg is not null && _tab is not null && !IsLoopRunning;
+
+    /// <summary>Row context menu, <em>Run this spec</em>. Deliberately reads
+    /// nothing from the checkbox selection and writes nothing back to it.</summary>
+    private void RunSpec(SpecRow? row)
     {
-        if (_tab is null) return;
-        var session = _tab;
+        if (row is null) return;
+        StartLoop(DefaultMode, new[] { row.File });
+    }
+
+    /// <summary>Row context menu, <em>Run with agent</em>. Forced to
+    /// Drover-driven: the override is a single-spec concept, and session-driven
+    /// mode carries per-spec agents inside its SPEC_FILENAMES list instead.</summary>
+    private void DispatchSpecToAgent(SpecDispatchArg? arg)
+    {
+        if (arg is null) return;
+        StartLoop(LoopMode.Drover, new[] { arg.Row.File }, arg.Agent.Name);
+    }
+
+    /// <summary>The checkbox-driven entry point behind <em>Run loop</em>.</summary>
+    private void StartLoopFromSelection(LoopMode mode)
+    {
         var selected = new System.Collections.Generic.List<SpecFile>();
         foreach (var r in Specs) if (r.IsSelected) selected.Add(r.File);
         if (selected.Count == 0) return;
+        StartLoop(mode, selected);
+    }
+
+    /// <param name="agentOverride">Non-null only for single-spec dispatch - see
+    /// <see cref="DroverDrivenLoopRunner"/>. Session-driven mode ignores it,
+    /// which is safe because dispatch never selects that mode.</param>
+    private void StartLoop(LoopMode mode, IReadOnlyList<SpecFile> specs, string? agentOverride = null)
+    {
+        if (_tab is null) return;
+        var session = _tab;
+        if (specs.Count == 0) return;
 
         // Specs always run in id-ascending order. The selection order in the
         // ListBox is irrelevant.
+        var selected = new System.Collections.Generic.List<SpecFile>(specs);
         selected.Sort((a, b) => string.Compare(a.Id, b.Id, System.StringComparison.OrdinalIgnoreCase));
 
         // Make sure the .drover scaffold is present before sending the prompt
@@ -277,7 +341,7 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         ILoopRunner runner = mode switch
         {
             LoopMode.Session => new SessionDrivenLoopRunner(_prompts, agentKind),
-            _                => new DroverDrivenLoopRunner(_prompts, agentKind),
+            _                => new DroverDrivenLoopRunner(_prompts, agentKind, agentOverride),
         };
 
         var token = _cts.Token;
@@ -350,6 +414,8 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         ((RelayCommand)RunLoopDroverCommand).NotifyCanExecuteChanged();
         ((RelayCommand)RunLoopSessionCommand).NotifyCanExecuteChanged();
         ((RelayCommand)StopLoopCommand).NotifyCanExecuteChanged();
+        RunSpecCommand.NotifyCanExecuteChanged();
+        DispatchSpecToAgentCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnIsLoopRunningChanged(bool value) => RaiseCommandStates();
@@ -361,3 +427,11 @@ public sealed partial class SpecsPanelViewModel : ObservableObject
         RaiseCommandStates();
     }
 }
+
+/// <summary>
+/// Command parameter for <see cref="SpecsPanelViewModel.DispatchSpecToAgentCommand"/>.
+/// Mirrors the Kanban panel's <c>DispatchArg</c> rather than sharing it: that one
+/// carries a <c>KanbanCard</c>, and generalising it would couple two unrelated
+/// ViewModels for the sake of one record.
+/// </summary>
+public sealed record SpecDispatchArg(SpecRow Row, AgentDefinition Agent);

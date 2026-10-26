@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+		<TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
@@ -11,7 +11,7 @@
 		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
 		<RootNamespace>Drover.App</RootNamespace>
 		<AssemblyName>Drover.App</AssemblyName>
-		<Version>0.6.0</Version>
+		<Version>0.8.0</Version>
 		<StartupObject>Drover.App.Program</StartupObject>
 		<Configurations>Debug;Release;Beta</Configurations>
 	</PropertyGroup>
@@ -52,13 +52,13 @@
 
 	<ItemGroup>
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
 		<PackageReference Include="Microsoft.Terminal.Wpf" Version="1.24.260303001" />
 		<PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
 		<PackageReference Include="AvalonEdit" Version="6.3.1.120" />
-		<PackageReference Include="Microsoft.Windows.Console.ConPTY" Version="1.24.260512001" />
-		<PackageReference Include="SharpVectors" Version="1.8.5" />
-		<PackageReference Include="Velopack" Version="1.2.0" />
+		<PackageReference Include="Microsoft.Windows.Console.ConPTY" Version="1.25.260930003" />
+		<PackageReference Include="SharpVectors" Version="1.8.6" />
+		<PackageReference Include="Velopack" Version="1.2.161" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="$(MSBuildThisFileDirectory)..\..\References\Microsoft.Terminal.Control.dll">
@@ -87,6 +87,7 @@
 
 	<ItemGroup>
 		<EmbeddedResource Include="Templates\*.md" />
+		<EmbeddedResource Include="Templates\*.json" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -98,7 +99,34 @@
 		<!-- Build dependency only — the indexer is launched as a separate process by
 		     SkillsRepoCatalog.RefreshAsync. Same shape as VaultMcp above. -->
 		<ProjectReference Include="..\Drover.SkillsIndexer\Drover.SkillsIndexer.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" PrivateAssets="all" ExcludeAssets="all" Private="false" />
+		<!-- Build dependency only — drover-hook.exe is run by Claude Code for each hook
+		     event. HooksInstaller copies it from hookforwarder/ into %APPDATA%\Drover\hooks
+		     so hook commands keep a stable path across updates and dev builds. -->
+		<ProjectReference Include="..\Drover.HookForwarder\Drover.HookForwarder.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" PrivateAssets="all" ExcludeAssets="all" Private="false" />
 	</ItemGroup>
+
+	<Target Name="CopyHookForwarderToOutput" AfterTargets="Build">
+		<PropertyGroup>
+			<HookForwarderOutDir>$(MSBuildThisFileDirectory)..\Drover.HookForwarder\bin\$(Configuration)\net10.0\</HookForwarderOutDir>
+		</PropertyGroup>
+		<ItemGroup>
+			<HookForwarderFiles Include="$(HookForwarderOutDir)drover-hook.exe" />
+			<HookForwarderFiles Include="$(HookForwarderOutDir)drover-hook.dll" />
+			<HookForwarderFiles Include="$(HookForwarderOutDir)drover-hook.runtimeconfig.json" />
+		</ItemGroup>
+		<Copy SourceFiles="@(HookForwarderFiles)" DestinationFolder="$(OutDir)hookforwarder\" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
+	</Target>
+
+	<Target Name="CopyHookForwarderToPublish" AfterTargets="Publish">
+		<PropertyGroup>
+			<HookForwarderPublishDir>$(MSBuildThisFileDirectory)..\Drover.HookForwarder\bin\$(Configuration)\net10.0\publish\</HookForwarderPublishDir>
+		</PropertyGroup>
+		<MSBuild Projects="..\Drover.HookForwarder\Drover.HookForwarder.csproj" Targets="Publish" Properties="Configuration=$(Configuration);TargetFramework=net10.0;PublishDir=$(HookForwarderPublishDir)" />
+		<ItemGroup>
+			<HookForwarderPublishedFiles Include="$(HookForwarderPublishDir)drover-hook.*" Exclude="$(HookForwarderPublishDir)*.pdb" />
+		</ItemGroup>
+		<Copy SourceFiles="@(HookForwarderPublishedFiles)" DestinationFolder="$(PublishDir)hookforwarder\" SkipUnchangedFiles="true" />
+	</Target>
 
 	<!-- Stage Drover.VaultMcp.exe + its runtime dependencies into a vaultmcp/ subfolder in
 	     OutDir so the deployed shape is `Drover.App.exe + vaultmcp/Drover.VaultMcp.exe`.

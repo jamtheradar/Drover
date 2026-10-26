@@ -37,20 +37,25 @@ Input:
 - `#` at start of message — append a memory to `CLAUDE.md`
 - `!` at start of message — run a shell command in this session
 - `@path/to/file` — attach a file or directory to the message
-- Drag-and-drop an image into the terminal — attach a screenshot
+- Drag-and-drop an image into the terminal, or `Ctrl+V` a screenshot — attach it
 
 ## Drover shortcuts
 
-- `Ctrl+Shift+P` — command palette
-- `Ctrl+Tab` / `Ctrl+Shift+Tab` — cycle tabs
+These reflect your current bindings (Settings ▸ Shortcuts).
+
+- `{{SC_CommandPalette}}` — command palette
+- `{{SC_CycleTabForward}}` / `{{SC_CycleTabBackward}}` — cycle tabs
 - `Ctrl+1`..`Ctrl+9` — jump to tab N
-- `F2` — rename current tab
-- `Ctrl+F` — find in current tab
-- `Ctrl+Shift+F` — search across all session logs
-- `Alt+P` — toggle plan panel
-- `Ctrl+Shift+T` — toggle tasks panel
-- `Alt+K` — toggle kanban board (drag local tasks · live TodoWrite mirror · agents catalog)
-- `Ctrl+,` — settings
+- `{{SC_RenameTab}}` — rename current tab
+- `{{SC_FindInTab}}` — find in current tab
+- `{{SC_GlobalFind}}` — search across all session logs
+- `{{SC_TogglePlanPanel}}` — toggle plan panel
+- `{{SC_ToggleTaskPanel}}` — toggle tasks panel
+- `{{SC_ToggleFileExplorerPanel}}` — toggle file explorer
+- `{{SC_ToggleKanbanPanel}}` — toggle kanban board (drag local tasks · live TodoWrite mirror · agents catalog)
+- `{{SC_ToggleSidebar}}` — show / hide the project sidebar
+- `{{SC_Settings}}` — settings
+- `Ctrl+C` with a selection, or `Ctrl+Shift+C` — copy · `Ctrl+V` / `Ctrl+Shift+V` — paste (text, screenshots and Explorer-copied files)
 - `Ctrl+Shift+\`` — bring Drover to the foreground (global)
 - `F1` — this cheat sheet
 - Drag a tab header sideways to reorder; drag it down out of the strip to tear off into a popped-out window.

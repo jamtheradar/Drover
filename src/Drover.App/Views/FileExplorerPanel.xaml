@@ -1,4 +1,4 @@
-<UserControl x:Class="Drover.App.Views.FileExplorerPanel"
+﻿<UserControl x:Class="Drover.App.Views.FileExplorerPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:m="clr-namespace:Drover.App.Models"
@@ -160,7 +160,7 @@
         <!-- Header -->
         <Border Grid.Row="0" BorderBrush="{StaticResource Chrome.Border}" BorderThickness="0,0,0,1" Padding="10,8">
             <DockPanel LastChildFill="True">
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,34,0">
                     <Button Style="{StaticResource FxIconButton}"
                             Command="{Binding RefreshFileExplorerCommand}"
                             ToolTip="Reload tree (F5)"

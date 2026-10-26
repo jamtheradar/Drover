@@ -1,4 +1,4 @@
-<UserControl x:Class="Drover.App.Views.SpecsPanel"
+﻿<UserControl x:Class="Drover.App.Views.SpecsPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:Drover.App.ViewModels"
@@ -86,7 +86,7 @@
                                FontSize="11" />
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,34,0">
                     <Button x:Name="RunLoopFaceButton"
                             Content="{Binding RunLoopButtonLabel}"
                             Command="{Binding RunLoopDefaultCommand}"
@@ -249,7 +249,28 @@
 
             <ListBox.ItemTemplate>
                 <DataTemplate>
-                    <Grid Margin="10,3">
+                    <!-- Background=Transparent so the whole row is hit-testable
+                         for the context menu, not just the text runs. -->
+                    <Grid Margin="10,3" Background="Transparent">
+                        <Grid.ContextMenu>
+                            <!-- Items are wired in code-behind rather than by
+                                 binding: a ContextMenu lives outside the visual
+                                 tree of its placement target, so
+                                 RelativeSource AncestorType=UserControl can't
+                                 reach the panel VM from inside a DataTemplate.
+                                 The Opened handler resolves the VM, rebuilds the
+                                 agent submenu, and sets enabled state. -->
+                            <ContextMenu Opened="OnSpecContextMenuOpened">
+                                <MenuItem Header="Run this spec"
+                                          Tag="run"
+                                          Click="OnRunThisSpecClick" />
+                                <MenuItem Header="Run with agent"
+                                          Tag="agents" />
+                                <Separator />
+                                <MenuItem Header="Open spec&#x2026;"
+                                          Click="OnOpenSpecClick" />
+                            </ContextMenu>
+                        </Grid.ContextMenu>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />

@@ -179,6 +179,8 @@ public sealed class HooksGateway : IDisposable
                 var message = ReadStr("message");
                 var turnId = ReadStr("turn_id");
                 var toolUseId = ReadStr("tool_use_id");
+                var agentId = ReadStr("agent_id");
+                var agentType = ReadStr("agent_type", "subagent_type");
                 var transcriptPath = ReadStr("transcript_path");
                 var sessionStartSource = ReadStr("source");
                 var lastAssistantMessage = ReadStr("last_assistant_message");
@@ -196,6 +198,8 @@ public sealed class HooksGateway : IDisposable
                     Kind = agentKind,
                     TurnId = string.IsNullOrEmpty(turnId) ? null : turnId,
                     ToolUseId = string.IsNullOrEmpty(toolUseId) ? null : toolUseId,
+                    AgentId = string.IsNullOrEmpty(agentId) ? null : agentId,
+                    AgentType = string.IsNullOrEmpty(agentType) ? null : agentType,
                     ToolInput = toolInput,
                     ToolResponse = toolResponse,
                     TranscriptPath = string.IsNullOrEmpty(transcriptPath) ? null : transcriptPath,
@@ -275,6 +279,8 @@ public sealed class HooksGateway : IDisposable
             phase = evt.Phase,
             turn_id = evt.TurnId,
             tool_use_id = evt.ToolUseId,
+            agent_id = evt.AgentId,
+            agent_type = evt.AgentType,
             transcript_path = evt.TranscriptPath,
             routed = !string.IsNullOrEmpty(evt.SessionId) && _routes.ContainsKey(evt.SessionId),
             body = evt.RawBody,
@@ -327,6 +333,12 @@ public sealed record HookEvent(string SessionId, string Type, string? Tool, stri
 
     /// <summary>Tool-use id (<c>tool_use_id</c>). Codex emits per tool event; Claude also carries it on tool events.</summary>
     public string? ToolUseId { get; init; }
+
+    /// <summary>Subagent id (<c>agent_id</c>) on Claude <c>SubagentStart</c>/<c>SubagentStop</c>. Null elsewhere and on CC versions that predate it.</summary>
+    public string? AgentId { get; init; }
+
+    /// <summary>Subagent type (<c>agent_type</c>, e.g. "Explore") on Claude <c>SubagentStart</c>/<c>SubagentStop</c>. Null elsewhere.</summary>
+    public string? AgentType { get; init; }
 
     /// <summary>Raw JSON of the <c>tool_input</c> object as it arrived on the wire. Null when the payload omitted it.</summary>
     public string? ToolInput { get; init; }

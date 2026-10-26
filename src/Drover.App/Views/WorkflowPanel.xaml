@@ -1,0 +1,477 @@
+<UserControl x:Class="Drover.App.Views.WorkflowPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource Chrome.Panel}"
+             Foreground="{StaticResource Chrome.Text}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <Style x:Key="WfButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{StaticResource Chrome.Border}" />
+            <Setter Property="Padding" Value="9,4" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Surface.ControlHover}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- The suggested next action for the stage the project is actually in. -->
+        <Style x:Key="WfPrimaryButton" TargetType="Button" BasedOn="{StaticResource WfButton}">
+            <Setter Property="BorderBrush" Value="{StaticResource Chrome.Accent}" />
+        </Style>
+
+        <Style x:Key="WfInfoButton" TargetType="Button" BasedOn="{StaticResource WfButton}">
+            <Setter Property="Padding" Value="5,1" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+            <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+            <Setter Property="ToolTip" Value="Show the exact paths Drover searched for this stage." />
+        </Style>
+
+        <Style x:Key="StageCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Surface.Control}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Chrome.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+
+        <Style x:Key="StageTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="StageBlurb" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,4,0,0" />
+        </Style>
+
+        <Style x:Key="StageStatus" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Chrome.Text}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+        </Style>
+
+        <!-- One "where we looked" row. The tick/cross is the whole point of the
+             info panel: an empty stage next to three crosses is a folder
+             problem, not a broken feature. -->
+        <DataTemplate x:Key="SearchPathTemplate">
+            <Grid Margin="0,3,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Margin="0,0,6,0" FontSize="11" VerticalAlignment="Top">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Text" Value="&#x2715;" />
+                            <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Exists}" Value="True">
+                                    <Setter Property="Text" Value="&#x2713;" />
+                                    <Setter Property="Foreground" Value="{StaticResource Kanban.GateOk}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding RelativePath}"
+                               FontFamily="Cascadia Code, Consolas, monospace"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Foreground="{StaticResource Chrome.Text}" />
+                    <TextBlock Text="{Binding Note}"
+                               FontSize="10"
+                               TextWrapping="Wrap"
+                               Foreground="{StaticResource Chrome.TextMuted}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <Style x:Key="InfoBlock" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Surface.Input}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Chrome.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+        </Style>
+
+        <!-- Flow-diagram node. Filled when that stage has content, so the strip
+             doubles as a progress indicator. -->
+        <Style x:Key="FlowNode" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Surface.Control}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Chrome.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="CornerRadius" Value="3" />
+        </Style>
+
+        <Style x:Key="FlowArrow" TargetType="TextBlock">
+            <Setter Property="Text" Value="&#x2192;" />
+            <Setter Property="Foreground" Value="{StaticResource Chrome.TextMuted}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="4,0" />
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel LastChildFill="True">
+
+        <Border DockPanel.Dock="Top"
+                Background="{StaticResource Chrome.Panel}"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,0,0,1"
+                Padding="10,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Text="Workflow" Style="{StaticResource StageTitle}" />
+                    <TextBlock Text="{Binding ProjectName}"
+                               Foreground="{StaticResource Chrome.TextMuted}"
+                               FontSize="11" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,26,0">
+                    <Button Content="Project folder"
+                            Style="{StaticResource WfButton}"
+                            Command="{Binding OpenProjectFolderCommand}"
+                            ToolTip="Open the project root in Explorer." />
+                    <Button Content="Rescan"
+                            Style="{StaticResource WfButton}"
+                            Margin="0"
+                            Command="{Binding RefreshCommand}"
+                            ToolTip="Re-read plans, task lists and specs from disk." />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom"
+                BorderBrush="{StaticResource Chrome.Border}"
+                BorderThickness="0,1,0,0"
+                Padding="10,5"
+                Visibility="{Binding HasProject, Converter={StaticResource BoolToVis}}">
+            <TextBlock Text="{Binding StatusText}"
+                       Foreground="{StaticResource Chrome.TextMuted}"
+                       FontSize="11"
+                       TextWrapping="Wrap" />
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="12,12,12,16">
+
+                <!-- The flow, spelled out. This is the bit that was only ever
+                     documented in CLAUDE.md and the plan files. -->
+                <TextBlock Text="How the pipeline fits together"
+                           Style="{StaticResource StageTitle}" />
+                <TextBlock Style="{StaticResource StageBlurb}"
+                           Text="Each stage narrows the last one. A plan is the thinking, a task is a line of work, a spec is a self-contained unit an agent can execute unattended, and the loop runs specs in order. You can start at any stage — but the run loop only ever executes specs." />
+
+                <WrapPanel Margin="0,10,0,0">
+                    <Border>
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource FlowNode}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasPlans}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{StaticResource Chrome.Accent}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="1 · Plan" FontSize="11" />
+                    </Border>
+                    <TextBlock Style="{StaticResource FlowArrow}" />
+                    <Border>
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource FlowNode}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasTaskFiles}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{StaticResource Chrome.Accent}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="2 · Tasks" FontSize="11" />
+                    </Border>
+                    <TextBlock Style="{StaticResource FlowArrow}" />
+                    <Border>
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource FlowNode}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasSpecs}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{StaticResource Chrome.Accent}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="3 · Spec" FontSize="11" />
+                    </Border>
+                    <TextBlock Style="{StaticResource FlowArrow}" />
+                    <Border>
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource FlowNode}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CanRunLoop}" Value="True">
+                                        <Setter Property="BorderBrush" Value="{StaticResource Chrome.Accent}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="4 · Run loop" FontSize="11" />
+                    </Border>
+                </WrapPanel>
+
+                <TextBlock Margin="0,14,0,8"
+                           Text="Open a project tab to scan its plans, tasks and specs."
+                           Foreground="{StaticResource Chrome.TextMuted}"
+                           FontSize="11"
+                           TextWrapping="Wrap">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasProject}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <StackPanel Margin="0,14,0,0"
+                            Visibility="{Binding HasProject, Converter={StaticResource BoolToVis}}">
+
+                    <!-- ── Stage 1 · Plan ─────────────────────────────────── -->
+                    <Border Style="{StaticResource StageCard}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="1 · Plan" Style="{StaticResource StageTitle}" />
+                                <Button Content="&#x24D8;"
+                                        Style="{StaticResource WfInfoButton}"
+                                        Command="{Binding TogglePlanInfoCommand}" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource StageBlurb}"
+                                       Text="A markdown document describing intent — phases, rationale, decisions. Written by you or by an agent in plan mode. Nothing executes from here." />
+                            <TextBlock Text="{Binding PlanSummary}" Style="{StaticResource StageStatus}" />
+
+                            <Border Style="{StaticResource InfoBlock}"
+                                    Visibility="{Binding IsPlanInfoOpen, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="Drover looks here, in this order:"
+                                               FontSize="11"
+                                               Foreground="{StaticResource Chrome.TextMuted}" />
+                                    <ItemsControl ItemsSource="{Binding PlanSearchPaths}"
+                                                  ItemTemplate="{StaticResource SearchPathTemplate}" />
+                                    <TextBlock Style="{StaticResource StageBlurb}"
+                                               Text="The plans folder is per-project — change it in Edit project ▸ Plans folder. Files under done/ are archived, not deleted." />
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button Content="Create PLAN.md"
+                                        Command="{Binding CreatePlanCommand}"
+                                        ToolTip="Writes a starter plan from Drover's template.">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource WfPrimaryButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasPlans}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="Open plan panel"
+                                        Style="{StaticResource WfButton}"
+                                        Command="{Binding OpenPlanPanelCommand}"
+                                        ToolTip="Read, edit and send plan sections to the session." />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── Stage 2 · Tasks ────────────────────────────────── -->
+                    <Border Style="{StaticResource StageCard}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="2 · Tasks" Style="{StaticResource StageTitle}" />
+                                <Button Content="&#x24D8;"
+                                        Style="{StaticResource WfInfoButton}"
+                                        Command="{Binding ToggleTaskInfoCommand}" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource StageBlurb}"
+                                       Text="A checkbox list of concrete actions. Derived from a plan, or written straight down. This is the shopping list a spec gets promoted from." />
+                            <TextBlock Text="{Binding TaskSummary}" Style="{StaticResource StageStatus}" />
+
+                            <Border Style="{StaticResource InfoBlock}"
+                                    Visibility="{Binding IsTaskInfoOpen, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="Drover looks here, in this order:"
+                                               FontSize="11"
+                                               Foreground="{StaticResource Chrome.TextMuted}" />
+                                    <ItemsControl ItemsSource="{Binding TaskSearchPaths}"
+                                                  ItemTemplate="{StaticResource SearchPathTemplate}" />
+                                    <TextBlock Style="{StaticResource StageBlurb}"
+                                               Text="Task lines must be markdown checkboxes — `- [ ] text`. Lines without a checkbox are ignored, which is the usual reason a file looks empty in the Tasks panel." />
+                                </StackPanel>
+                            </Border>
+
+                            <Grid Margin="0,10,0,0"
+                                  Visibility="{Binding HasPlans, Converter={StaticResource BoolToVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox Grid.Column="0"
+                                          ItemsSource="{Binding Plans}"
+                                          SelectedItem="{Binding SelectedPlan}"
+                                          DisplayMemberPath="RelativePath"
+                                          Margin="0,0,6,0"
+                                          ToolTip="Which plan to derive tasks from." />
+                                <Button Grid.Column="1"
+                                        Content="Generate tasks from plan"
+                                        Style="{StaticResource WfPrimaryButton}"
+                                        Margin="0"
+                                        Command="{Binding GenerateTasksFromPlanCommand}"
+                                        ToolTip="Sends the plan-to-tasks prompt to this tab's session. It appends `- [ ] …` lines to the task list; it never edits the plan." />
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="Create TASKS.md"
+                                        Command="{Binding CreateTasksFileCommand}"
+                                        ToolTip="Writes a starter task list from Drover's template.">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource WfButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasTaskFiles}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="Open tasks panel"
+                                        Style="{StaticResource WfButton}"
+                                        Command="{Binding OpenTaskPanelCommand}"
+                                        ToolTip="Right-click any task row there to promote it into a spec." />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── Stage 3 · Spec ─────────────────────────────────── -->
+                    <Border Style="{StaticResource StageCard}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="3 · Spec" Style="{StaticResource StageTitle}" />
+                                <Button Content="&#x24D8;"
+                                        Style="{StaticResource WfInfoButton}"
+                                        Command="{Binding ToggleSpecInfoCommand}" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource StageBlurb}"
+                                       Text="The unit of work: one file per job at specs/NNNN-slug.md, holding context, affected files, approach, acceptance criteria and a test plan. Its frontmatter status is the contract Drover reads." />
+                            <TextBlock Text="{Binding SpecSummary}" Style="{StaticResource StageStatus}" />
+
+                            <Border Style="{StaticResource InfoBlock}"
+                                    Visibility="{Binding IsSpecInfoOpen, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="Drover looks here:"
+                                               FontSize="11"
+                                               Foreground="{StaticResource Chrome.TextMuted}" />
+                                    <ItemsControl ItemsSource="{Binding SpecSearchPaths}"
+                                                  ItemTemplate="{StaticResource SearchPathTemplate}" />
+                                    <TextBlock Style="{StaticResource StageBlurb}"
+                                               Text="How a spec gets written: Tasks panel ▸ right-click a row ▸ Promote (interrogate). The session asks you questions, then writes the spec file. Initialize first so .drover/spec-template.md and the editable prompts exist." />
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button Content="Initialize .drover"
+                                        Command="{Binding InitializeSpecsCommand}"
+                                        ToolTip="Copies the spec template, the editable prompts and starter subagents into this project.">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource WfPrimaryButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsDroverInitialized}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="Open tasks panel to promote"
+                                        Command="{Binding OpenTaskPanelCommand}"
+                                        ToolTip="Promotion happens from a task row.">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource WfButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasTaskFiles}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="Open specs panel"
+                                        Style="{StaticResource WfButton}"
+                                        Command="{Binding OpenSpecsPanelCommand}"
+                                        ToolTip="List of specs with their status and per-spec run actions." />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ── Stage 4 · Run loop ─────────────────────────────── -->
+                    <Border Style="{StaticResource StageCard}">
+                        <StackPanel>
+                            <TextBlock Text="4 · Run loop" Style="{StaticResource StageTitle}" />
+                            <TextBlock Style="{StaticResource StageBlurb}"
+                                       Text="Executes specs. Tick the specs you want in the Specs panel and press Run loop. Drover-driven runs one spec per fresh prompt and stops on a major block; session-driven hands the whole batch to one session. Both only ever read the spec frontmatter to decide what happened." />
+                            <TextBlock Text="{Binding LoopSummary}" Style="{StaticResource StageStatus}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button Content="Open specs panel"
+                                        Command="{Binding OpenSpecsPanelCommand}"
+                                        ToolTip="Select specs and run the loop from there.">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource WfButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding CanRunLoop}" Value="True">
+                                                    <Setter Property="BorderBrush" Value="{StaticResource Chrome.Accent}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

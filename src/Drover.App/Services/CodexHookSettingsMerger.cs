@@ -87,7 +87,7 @@ internal static class CodexHookSettingsMerger
             UpsertEvent(hooks, evt, scriptPath, command);
 
         AtomicFile.WriteAllText(path,
-            root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            root.ToJsonString(SettingsJson.Indented));
     }
 
     /// <summary>
@@ -128,7 +128,7 @@ internal static class CodexHookSettingsMerger
         if (hooks.Count == 0) rootObj.Remove("hooks");
 
         AtomicFile.WriteAllText(path,
-            root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            root.ToJsonString(SettingsJson.Indented));
     }
 
     private static void UpsertEvent(JsonObject hooks, string eventName, string scriptPath, string command)

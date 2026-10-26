@@ -54,6 +54,20 @@ public sealed class TokenStats
     private readonly DispatcherTimer _timer;
     private DateTime _lastDayKey = DateTime.MinValue;
 
+    // Refresh() sits on a hot path — Claude Code pushes a statusLine per session every
+    // few seconds and every push asks for a rescan — while the scan itself walks every
+    // transcript JSONL under ~/.claude/projects. Debounce, and never run two at once.
+    private static readonly TimeSpan MinScanInterval = TimeSpan.FromSeconds(10);
+    private const int MaxEntriesPerFile = 50_000;
+    private static readonly List<UsageEntry> EmptyEntries = new();
+    private int _scanning;
+    private DateTime _lastScanStartUtc = DateTime.MinValue;
+
+    // Per-file scan cache keyed by full path, invalidated on (mtime, length). Transcripts
+    // are append-only and every file but the live one is immutable, so a warm cache turns
+    // a full-history walk into re-reading whichever session just wrote.
+    private readonly Dictionary<string, FileScan> _fileCache = new(StringComparer.OrdinalIgnoreCase);
+
     public double DailyCostUsd { get; private set; }
     public long DailyInputTokens { get; private set; }
     public long DailyOutputTokens { get; private set; }
@@ -91,40 +105,86 @@ public sealed class TokenStats
         {
             Interval = TimeSpan.FromSeconds(15)
         };
-        _timer.Tick += (_, _) => Refresh();
+        _timer.Tick += (_, _) => Refresh(force: true);
     }
 
     public void Start()
     {
-        Refresh();
+        Refresh(force: true);
         _timer.Start();
     }
 
-    public void Refresh()
+    /// <summary>
+    /// Requests a scan. Safe to call from hot paths — every statusLine push on every
+    /// tab lands here — because the transcript walk is debounced to
+    /// <see cref="MinScanInterval"/>, coalesced to one in-flight scan, and runs on a
+    /// worker thread. Only <see cref="Apply"/> touches the UI thread.
+    /// </summary>
+    public void Refresh() => Refresh(force: false);
+
+    /// <summary>
+    /// <paramref name="force"/> bypasses the debounce. Used by <see cref="Start"/> and
+    /// the polling timer, which already runs on its own cadence.
+    /// </summary>
+    public void Refresh(bool force)
     {
-        try { RefreshCore(); } catch { /* never propagate from a background poll */ }
+        if (!force && DateTime.UtcNow - _lastScanStartUtc < MinScanInterval) return;
+        StartScan();
     }
 
-    private void RefreshCore()
+    private void StartScan()
     {
-        var root = ClaudeProjectsRoot();
-        if (root is null || !Directory.Exists(root)) return;
+        // One scan at a time. A few months of history is hundreds of MB of JSONL;
+        // queuing scans would just pile worker threads onto the same disk.
+        if (Interlocked.CompareExchange(ref _scanning, 1, 0) != 0) return;
 
-        var today = DateTime.UtcNow.Date;
-        _lastDayKey = today;
+        _lastScanStartUtc = DateTime.UtcNow;
 
-        // Collect per-tab metrics by walking transcripts in each project dir.
-        // Claude encodes the cwd in the dir name; we match loosely by the path
-        // basename for resilience against the exact encoding scheme.
-        var tabsByPath = _shell.Tabs
-            .GroupBy(t => t.Project.Path, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        // Snapshot the tab set on the calling (UI) thread so the worker never touches
+        // the ObservableCollection or any ViewModel state.
+        var tabsByPath = SnapshotTabsByPath();
+
+        Task.Run(() =>
+        {
+            ScanResult? result = null;
+            try { result = ScanCore(tabsByPath); }
+            catch { /* never propagate from a background poll */ }
+            finally { Interlocked.Exchange(ref _scanning, 0); }
+
+            if (result is null) return;
+            var app = System.Windows.Application.Current;
+            if (app is null) return;
+            app.Dispatcher.BeginInvoke(new Action(() => Apply(result)), DispatcherPriority.Background);
+        });
+    }
+
+    private Dictionary<string, List<TerminalTabViewModel>> SnapshotTabsByPath()
+    {
+        var map = new Dictionary<string, List<TerminalTabViewModel>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in _shell.Tabs)
+        {
+            if (!map.TryGetValue(t.Project.Path, out var list)) map[t.Project.Path] = list = new();
+            list.Add(t);
+        }
         if (_shell.SecondaryTab is { } sec)
         {
-            if (!tabsByPath.TryGetValue(sec.Project.Path, out var list))
-                tabsByPath[sec.Project.Path] = list = new();
+            if (!map.TryGetValue(sec.Project.Path, out var list)) map[sec.Project.Path] = list = new();
             list.Add(sec);
         }
+        return map;
+    }
+
+    /// <summary>
+    /// Walks every transcript JSONL under <c>~/.claude/projects</c> and aggregates it.
+    /// Worker thread only — takes a pre-snapshotted tab map and returns a plain result
+    /// record for <see cref="Apply"/> to push into ViewModel state.
+    /// </summary>
+    private ScanResult? ScanCore(Dictionary<string, List<TerminalTabViewModel>> tabsByPath)
+    {
+        var root = ClaudeProjectsRoot();
+        if (root is null || !Directory.Exists(root)) return null;
+
+        var today = DateTime.UtcNow.Date;
 
         double dayCost = 0;
         long dayIn = 0, dayOut = 0, dayCache = 0;
@@ -136,7 +196,7 @@ public sealed class TokenStats
         // 5h" is wrong when a previous window straddles the boundary.
         var nowUtc = DateTime.UtcNow;
         var sessionScanEdge = nowUtc - TimeSpan.FromHours(24);
-        var sessionEntries = new List<(DateTime ts, double cost, long input, long output, long cache)>(256);
+        var sessionEntries = new List<UsageEntry>(256);
 
         // Extended aggregates
         double cost7 = 0, cost30 = 0, costAll = 0;
@@ -150,8 +210,10 @@ public sealed class TokenStats
         var byProject7 = new Dictionary<string, (double cost, long tokens)>(StringComparer.OrdinalIgnoreCase);
         var byModel7 = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         var sessions = new List<SessionRow>(256);
+        var tabMetrics = new List<TabMetrics>();
         var sevenDaysAgo = today.AddDays(-6);
         var thirtyDaysAgo = today.AddDays(-29);
+        var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var dir in Directory.EnumerateDirectories(root))
         {
@@ -171,68 +233,27 @@ public sealed class TokenStats
             // don't include a model field (e.g. tool-result-only writes).
             string? fallbackModel = null;
 
-            foreach (var file in Directory.EnumerateFiles(dir, "*.jsonl"))
+            foreach (var path in Directory.EnumerateFiles(dir, "*.jsonl"))
             {
-                long inTok = 0, outTok = 0, cRead = 0, cWrite = 0;
-                string? model = null;
-                long lastInputForContext = 0;
+                seenFiles.Add(path);
+                var scan = ScanFile(path, sessionScanEdge);
+                if (scan is null) continue;
 
-                using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                using var sr = new StreamReader(fs);
-                string? line;
-                var fileWriteUtc = File.GetLastWriteTimeUtc(file);
-                long fileBudget = 0;
-                bool fileHasThinking = false;
-                // Skip per-line timestamp capture entirely if the whole file is older than the scan edge.
-                var maybeInScan = fileWriteUtc >= sessionScanEdge;
-                while ((line = sr.ReadLine()) is not null)
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    // Cheap upfront detection: a `"type":"thinking"` substring is a sufficient
-                    // signal that a thinking block is present on this line. Avoids the cost of
-                    // full JSON-parsing every assistant turn (transcript lines can be huge) and
-                    // sidesteps any future schema drift around where budget_tokens lives.
-                    if (line.IndexOf("\"type\":\"thinking\"", System.StringComparison.Ordinal) >= 0)
-                        fileHasThinking = true;
-                    // Budget often appears inside the request body which CC stores as an
-                    // escaped JSON string, so the literal `"budget_tokens":N` is JSON-escaped to
-                    // `\"budget_tokens\":N`. The regex tolerates both unescaped and escaped forms
-                    // and keeps the largest budget seen on this line.
-                    if (fileBudget == 0)
-                    {
-                        var bm = BudgetTokensRx.Match(line);
-                        if (bm.Success && long.TryParse(bm.Groups[1].Value, out var bv) && bv > 0)
-                            fileBudget = bv;
-                    }
-                    if (TryReadEffort(line, out var budget, out var hadThinking))
-                    {
-                        if (budget > 0) fileBudget = budget;
-                        if (hadThinking) fileHasThinking = true;
-                    }
-                    if (!TryReadUsage(line, out var u, out var m, out var ts)) continue;
-                    if (m is not null) model = m;
-                    inTok += u.input;
-                    outTok += u.output;
-                    cRead += u.cacheRead;
-                    cWrite += u.cacheWrite;
-                    lastInputForContext = u.input + u.cacheRead + u.cacheWrite;
+                var model = scan.Model;
+                var fileCost = scan.Cost;
+                var fileTokens = scan.InputTokens + scan.OutputTokens + scan.CacheRead + scan.CacheWrite;
+                var fileDate = scan.WriteUtc.Date;
 
-                    if (maybeInScan && ts is { } tsv && tsv >= sessionScanEdge)
-                    {
-                        var entryCost = CostFor(m ?? model, u.input, u.output, u.cacheRead, u.cacheWrite);
-                        sessionEntries.Add((tsv, entryCost, u.input, u.output, u.cacheRead + u.cacheWrite));
-                    }
-                }
-
-                var fileCost = CostFor(model, inTok, outTok, cRead, cWrite);
-                var fileTokens = inTok + outTok + cRead + cWrite;
-                var fileDate = fileWriteUtc.Date;
+                // Entries were captured when the file was inside the 24h edge; re-filter
+                // because a cached file's entries age out without the file changing.
+                foreach (var e in scan.Entries)
+                    if (e.Ts >= sessionScanEdge) sessionEntries.Add(e);
 
                 // All-time
                 costAll += fileCost;
-                inAll += inTok;
-                outAll += outTok;
-                cacheAll += cRead + cWrite;
+                inAll += scan.InputTokens;
+                outAll += scan.OutputTokens;
+                cacheAll += scan.CacheRead + scan.CacheWrite;
 
                 // 30-day window
                 if (fileDate >= thirtyDaysAgo)
@@ -255,9 +276,9 @@ public sealed class TokenStats
                     dailyMap[fileDate] = pt with
                     {
                         Cost = pt.Cost + fileCost,
-                        Input = pt.Input + inTok,
-                        Output = pt.Output + outTok,
-                        Cache = pt.Cache + cRead + cWrite
+                        Input = pt.Input + scan.InputTokens,
+                        Output = pt.Output + scan.OutputTokens,
+                        Cache = pt.Cache + scan.CacheRead + scan.CacheWrite
                     };
                 }
 
@@ -265,9 +286,9 @@ public sealed class TokenStats
                 if (fileDate == today)
                 {
                     dayCost += fileCost;
-                    dayIn += inTok;
-                    dayOut += outTok;
-                    dayCache += cRead + cWrite;
+                    dayIn += scan.InputTokens;
+                    dayOut += scan.OutputTokens;
+                    dayCache += scan.CacheRead + scan.CacheWrite;
                     var modelLabel = model ?? "unknown";
                     byModelToday.TryGetValue(modelLabel, out var prev);
                     byModelToday[modelLabel] = prev + fileCost;
@@ -275,20 +296,18 @@ public sealed class TokenStats
 
                 // Recent sessions (any session with usage in the last 30 days)
                 if (fileDate >= thirtyDaysAgo && fileTokens > 0)
-                {
-                    sessions.Add(new SessionRow(fileWriteUtc, projectLabel, model, fileCost, fileTokens));
-                }
+                    sessions.Add(new SessionRow(scan.WriteUtc, projectLabel, model, fileCost, fileTokens));
 
                 if (match is not null)
                 {
                     if (model is not null) fallbackModel = model;
-                    if (fileWriteUtc > sessionMtime)
+                    if (scan.WriteUtc > sessionMtime)
                     {
-                        sessionMtime = fileWriteUtc;
+                        sessionMtime = scan.WriteUtc;
                         sessionModel = model;
-                        sessionContext = lastInputForContext;
-                        sessionBudget = fileBudget;
-                        sessionHadThinking = fileHasThinking;
+                        sessionContext = scan.LastInputForContext;
+                        sessionBudget = scan.Budget;
+                        sessionHadThinking = scan.HasThinking;
                         sessionCost = fileCost;
                     }
                 }
@@ -301,20 +320,21 @@ public sealed class TokenStats
                 var limit = (modelOut is not null && modelOut.Contains("[1m]", StringComparison.OrdinalIgnoreCase))
                     ? ExtendedContextLimit : DefaultContextLimit;
                 var effort = EffortLabel(sessionBudget, sessionHadThinking);
-                foreach (var tab in match)
-                    tab.UpdateMetrics(modelOut, sessionContext, limit, sessionCost, effort);
+                tabMetrics.Add(new TabMetrics(match, modelOut, sessionContext, limit, sessionCost, effort));
             }
         }
+
+        PruneFileCache(seenFiles);
 
         // Walk usage entries in time order to find the first message of the *current*
         // 5h window. A new window opens when the gap from the last accepted message
         // is >= 5h. The current window is whichever the most recent message falls into.
-        sessionEntries.Sort((a, b) => a.ts.CompareTo(b.ts));
+        sessionEntries.Sort((a, b) => a.Ts.CompareTo(b.Ts));
         DateTime? curStart = null;
-        foreach (var (ts, _, _, _, _) in sessionEntries)
+        foreach (var e in sessionEntries)
         {
-            if (curStart is null || ts >= curStart.Value + SessionWindowLength)
-                curStart = ts;
+            if (curStart is null || e.Ts >= curStart.Value + SessionWindowLength)
+                curStart = e.Ts;
         }
         // If the current window has already elapsed (no message in last 5h), we have no
         // active window — the next message will open a fresh one.
@@ -326,51 +346,208 @@ public sealed class TokenStats
         {
             foreach (var e in sessionEntries)
             {
-                if (e.ts < start) continue;
-                winCost += e.cost;
-                winIn += e.input;
-                winOut += e.output;
-                winCache += e.cache;
+                if (e.Ts < start) continue;
+                winCost += e.Cost;
+                winIn += e.Input;
+                winOut += e.Output;
+                winCache += e.Cache;
             }
         }
-        SessionCostUsd = winCost;
-        SessionInputTokens = winIn;
-        SessionOutputTokens = winOut;
-        SessionCacheTokens = winCache;
-        SessionWindowStartUtc = curStart;
-        SessionResetUtc = curStart is { } e2 ? e2 + SessionWindowLength : null;
 
-        DailyCostUsd = dayCost;
-        DailyInputTokens = dayIn;
-        DailyOutputTokens = dayOut;
-        DailyCacheTokens = dayCache;
-        DailyByModel = byModelToday
-            .OrderByDescending(kv => kv.Value)
-            .Select(kv => (kv.Key, kv.Value))
-            .ToList();
+        return new ScanResult(
+            today,
+            dayCost, dayIn, dayOut, dayCache,
+            byModelToday.OrderByDescending(kv => kv.Value).Select(kv => (kv.Key, kv.Value)).ToList(),
+            curStart, winCost, winIn, winOut, winCache,
+            cost7, cost30, costAll,
+            inAll, outAll, cacheAll,
+            dailyMap.Values.OrderBy(p => p.Date).ToList(),
+            byProject7.OrderByDescending(kv => kv.Value.cost)
+                .Select(kv => new ProjectTotals(kv.Key, kv.Value.cost, kv.Value.tokens)).ToList(),
+            byModel7.OrderByDescending(kv => kv.Value).Select(kv => (kv.Key, kv.Value)).ToList(),
+            sessions.OrderByDescending(s => s.LastWriteUtc).Take(20).ToList(),
+            tabMetrics);
+    }
 
-        Last7DaysCostUsd = cost7;
-        Last30DaysCostUsd = cost30;
-        AllTimeCostUsd = costAll;
-        AllTimeInputTokens = inAll;
-        AllTimeOutputTokens = outAll;
-        AllTimeCacheTokens = cacheAll;
-        DailySeries = dailyMap.Values.OrderBy(p => p.Date).ToList();
-        ProjectTotals7d = byProject7
-            .OrderByDescending(kv => kv.Value.cost)
-            .Select(kv => new ProjectTotals(kv.Key, kv.Value.cost, kv.Value.tokens))
-            .ToList();
-        ModelByCost7d = byModel7
-            .OrderByDescending(kv => kv.Value)
-            .Select(kv => (kv.Key, kv.Value))
-            .ToList();
-        RecentSessions = sessions
-            .OrderByDescending(s => s.LastWriteUtc)
-            .Take(20)
-            .ToList();
+    /// <summary>UI thread. Publishes a completed scan and notifies subscribers.</summary>
+    private void Apply(ScanResult r)
+    {
+        _lastDayKey = r.Today;
+
+        SessionCostUsd = r.SessionCost;
+        SessionInputTokens = r.SessionIn;
+        SessionOutputTokens = r.SessionOut;
+        SessionCacheTokens = r.SessionCache;
+        SessionWindowStartUtc = r.SessionWindowStartUtc;
+        SessionResetUtc = r.SessionWindowStartUtc is { } s ? s + SessionWindowLength : null;
+
+        DailyCostUsd = r.DayCost;
+        DailyInputTokens = r.DayIn;
+        DailyOutputTokens = r.DayOut;
+        DailyCacheTokens = r.DayCache;
+        DailyByModel = r.ByModelToday;
+
+        Last7DaysCostUsd = r.Cost7;
+        Last30DaysCostUsd = r.Cost30;
+        AllTimeCostUsd = r.CostAll;
+        AllTimeInputTokens = r.InAll;
+        AllTimeOutputTokens = r.OutAll;
+        AllTimeCacheTokens = r.CacheAll;
+        DailySeries = r.DailySeries;
+        ProjectTotals7d = r.ProjectTotals7d;
+        ModelByCost7d = r.ModelByCost7d;
+        RecentSessions = r.RecentSessions;
+
+        foreach (var tm in r.TabMetrics)
+            foreach (var tab in tm.Tabs)
+                tab.UpdateMetrics(tm.Model, tm.Context, tm.Limit, tm.Cost, tm.Effort);
 
         Updated?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>
+    /// Returns the cached scan for <paramref name="path"/> when the file is unchanged,
+    /// otherwise re-reads it. Transcripts are append-only and all but the live one are
+    /// immutable, so a warm cache turns a full-history walk into re-reading one file.
+    /// </summary>
+    private FileScan? ScanFile(string path, DateTime sessionScanEdge)
+    {
+        DateTime writeUtc;
+        long length;
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) return null;
+            writeUtc = info.LastWriteTimeUtc;
+            length = info.Length;
+        }
+        catch { return null; }
+
+        lock (_fileCache)
+        {
+            if (_fileCache.TryGetValue(path, out var cached)
+                && cached.WriteUtc == writeUtc && cached.Length == length)
+                return cached;
+        }
+
+        var scan = ReadFile(path, writeUtc, sessionScanEdge);
+        if (scan is null) return null;
+        lock (_fileCache) _fileCache[path] = scan;
+        return scan;
+    }
+
+    private void PruneFileCache(HashSet<string> seen)
+    {
+        lock (_fileCache)
+        {
+            if (_fileCache.Count <= seen.Count) return;
+            foreach (var key in _fileCache.Keys.Where(k => !seen.Contains(k)).ToList())
+                _fileCache.Remove(key);
+        }
+    }
+
+    private static FileScan? ReadFile(string path, DateTime writeUtc, DateTime sessionScanEdge)
+    {
+        long inTok = 0, outTok = 0, cRead = 0, cWrite = 0;
+        string? model = null;
+        long lastInputForContext = 0;
+        long fileBudget = 0;
+        bool fileHasThinking = false;
+        long length;
+
+        // Skip per-line timestamp capture entirely if the whole file is older than the scan edge.
+        var maybeInScan = writeUtc >= sessionScanEdge;
+        var entries = maybeInScan ? new List<UsageEntry>(64) : EmptyEntries;
+
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            length = fs.Length;
+            using var sr = new StreamReader(fs);
+            string? line;
+            while ((line = sr.ReadLine()) is not null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                // Cheap upfront detection: a `"type":"thinking"` substring is a sufficient
+                // signal that a thinking block is present on this line. Avoids the cost of
+                // full JSON-parsing every assistant turn (transcript lines can be huge) and
+                // sidesteps any future schema drift around where budget_tokens lives.
+                if (line.IndexOf("\"type\":\"thinking\"", StringComparison.Ordinal) >= 0)
+                    fileHasThinking = true;
+
+                // JsonDocument.Parse per line over the whole history is by far the most
+                // expensive thing this class does, so every parse is gated on a literal the
+                // line must contain for the parse to find anything. Budget often appears
+                // inside the request body which CC stores as an escaped JSON string, so the
+                // literal `"budget_tokens":N` is JSON-escaped to `\"budget_tokens\":N`. The
+                // regex tolerates both forms and keeps the largest budget seen on this line.
+                if (line.IndexOf("budget_tokens", StringComparison.Ordinal) >= 0)
+                {
+                    if (fileBudget == 0)
+                    {
+                        var bm = BudgetTokensRx.Match(line);
+                        if (bm.Success && long.TryParse(bm.Groups[1].Value, out var bv) && bv > 0)
+                            fileBudget = bv;
+                    }
+                    if (TryReadEffort(line, out var budget, out var hadThinking))
+                    {
+                        if (budget > 0) fileBudget = budget;
+                        if (hadThinking) fileHasThinking = true;
+                    }
+                }
+
+                // TryReadUsage returns false without a usage object, so lines that can't
+                // carry one are skipped before paying for a parse.
+                if (line.IndexOf("\"usage\"", StringComparison.Ordinal) < 0) continue;
+                if (!TryReadUsage(line, out var u, out var m, out var ts)) continue;
+                if (m is not null) model = m;
+                inTok += u.input;
+                outTok += u.output;
+                cRead += u.cacheRead;
+                cWrite += u.cacheWrite;
+                lastInputForContext = u.input + u.cacheRead + u.cacheWrite;
+
+                if (maybeInScan && ts is { } tsv && tsv >= sessionScanEdge
+                    && entries.Count < MaxEntriesPerFile)
+                {
+                    var entryCost = CostFor(m ?? model, u.input, u.output, u.cacheRead, u.cacheWrite);
+                    entries.Add(new UsageEntry(tsv, entryCost, u.input, u.output, u.cacheRead + u.cacheWrite));
+                }
+            }
+        }
+        catch { return null; }
+
+        var cost = CostFor(model, inTok, outTok, cRead, cWrite);
+        return new FileScan(writeUtc, length, inTok, outTok, cRead, cWrite,
+            model, cost, lastInputForContext, fileBudget, fileHasThinking, entries);
+    }
+
+    private readonly record struct UsageEntry(DateTime Ts, double Cost, long Input, long Output, long Cache);
+
+    /// <summary>Cached aggregate for one transcript file, keyed on (mtime, length).</summary>
+    private sealed record FileScan(
+        DateTime WriteUtc, long Length,
+        long InputTokens, long OutputTokens, long CacheRead, long CacheWrite,
+        string? Model, double Cost, long LastInputForContext,
+        long Budget, bool HasThinking, List<UsageEntry> Entries);
+
+    private sealed record TabMetrics(
+        List<TerminalTabViewModel> Tabs, string? Model, long Context, long Limit, double Cost, string Effort);
+
+    private sealed record ScanResult(
+        DateTime Today,
+        double DayCost, long DayIn, long DayOut, long DayCache,
+        List<(string Model, double Cost)> ByModelToday,
+        DateTime? SessionWindowStartUtc, double SessionCost, long SessionIn, long SessionOut, long SessionCache,
+        double Cost7, double Cost30, double CostAll,
+        long InAll, long OutAll, long CacheAll,
+        List<DailyPoint> DailySeries,
+        List<ProjectTotals> ProjectTotals7d,
+        List<(string Model, double Cost)> ModelByCost7d,
+        List<SessionRow> RecentSessions,
+        List<TabMetrics> TabMetrics);
+
 
     private static string ProjectLabelFromDir(string dir)
     {

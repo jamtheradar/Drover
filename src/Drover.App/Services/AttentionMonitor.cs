@@ -73,6 +73,13 @@ public sealed class AttentionMonitor : IAttentionSource
         _buffer.Append(chunk);
         if (_buffer.Length > 8192) _buffer.Remove(0, _buffer.Length - 4096);
 
+        // This runs on the PTY read-loop thread for every chunk of every tab, so bail
+        // before materialising the buffer and running the regex unless the chunk could
+        // plausibly complete an OSC title. A title sequence always ends in BEL or ESC \,
+        // so a chunk with neither terminator can't have finished one that the previous
+        // chunk didn't already report.
+        if (chunk.IndexOf(Bel) < 0 && chunk.IndexOf('\\') < 0) return;
+
         var matches = OscTitle.Matches(_buffer.ToString());
         if (matches.Count == 0) return;
 

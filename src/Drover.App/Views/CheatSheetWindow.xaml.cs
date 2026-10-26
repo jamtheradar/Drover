@@ -11,12 +11,25 @@ public partial class CheatSheetWindow : Window
 {
     private readonly string _fullMarkdown;
 
-    public CheatSheetWindow()
+    public CheatSheetWindow(KeyboardShortcuts? shortcuts = null)
     {
         InitializeComponent();
-        _fullMarkdown = LoadBundledMarkdown();
+        _fullMarkdown = SubstituteShortcuts(LoadBundledMarkdown(), shortcuts ?? new KeyboardShortcuts());
         Render(_fullMarkdown);
         Loaded += (_, _) => SearchBox.Focus();
+    }
+
+    /// <summary>Replaces <c>{{SC_Name}}</c> tokens with the live binding for each
+    /// <see cref="KeyboardShortcuts"/> property, so the sheet never drifts from settings.</summary>
+    private static string SubstituteShortcuts(string md, KeyboardShortcuts sc)
+    {
+        foreach (var p in typeof(KeyboardShortcuts).GetProperties())
+        {
+            if (p.PropertyType != typeof(string)) continue;
+            var value = GestureParser.Display(p.GetValue(sc) as string);
+            md = md.Replace("{{SC_" + p.Name + "}}", value.Length == 0 ? "(unbound)" : value);
+        }
+        return md;
     }
 
     private static string LoadBundledMarkdown()

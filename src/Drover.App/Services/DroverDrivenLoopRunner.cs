@@ -26,11 +26,24 @@ public sealed class DroverDrivenLoopRunner : ILoopRunner
     /// stopping the loop with an error is the right call.</summary>
     private static readonly System.TimeSpan PerSpecTimeout = System.TimeSpan.FromHours(2);
 
+    /// <summary>
+    /// Per-run agent override. When non-null it replaces the <c>AGENT</c>
+    /// token for every spec in the run, ignoring each spec's own
+    /// <c>agent:</c> frontmatter. It exists for the Specs panel's
+    /// single-spec "Run with agent" dispatch — a transient choice that must
+    /// never be written back to the file. A multi-spec run should leave this
+    /// null: one agent applied to a whole batch would silently override
+    /// per-spec assignments that the specs themselves declare.
+    /// </summary>
+    private readonly string? _agentOverride;
+
     public DroverDrivenLoopRunner(IPromptLibrary prompts,
-                                  HookAgentKind agentKind = HookAgentKind.Claude)
+                                  HookAgentKind agentKind = HookAgentKind.Claude,
+                                  string? agentOverride = null)
     {
         _prompts = prompts;
         _agentKind = agentKind;
+        _agentOverride = string.IsNullOrWhiteSpace(agentOverride) ? null : agentOverride;
     }
 
     public async Task RunAsync(
@@ -59,7 +72,19 @@ public sealed class DroverDrivenLoopRunner : ILoopRunner
             try
             {
                 prompt = _prompts.Resolve("execute-spec", projectRoot, _agentKind,
-                    new Dictionary<string, string> { ["SPEC_FILENAME"] = spec.FileName });
+                    new Dictionary<string, string>
+                    {
+                        ["SPEC_FILENAME"] = spec.FileName,
+                        // Empty when the spec assigns no agent — the prompt's
+                        // own wording covers the empty case, so there's no
+                        // placeholder to invent here. A dispatch override wins
+                        // over the file's own assignment for this run only.
+                        ["AGENT"] = _agentOverride ?? spec.Agent,
+                        // Ditto for the reviewer gate. Drover stays out of the
+                        // policy: a verifier-driven block reaches the runner as an
+                        // ordinary blocked + severity, indistinguishable from any other.
+                        ["VERIFY_WITH"] = spec.VerifyWith,
+                    });
             }
             catch (System.Exception ex)
             {

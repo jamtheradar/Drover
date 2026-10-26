@@ -26,10 +26,28 @@ public sealed class SettingsStore
     {
         try
         {
-            if (!File.Exists(_path)) return;
+            if (!File.Exists(_path))
+            {
+                // Fresh install: start with the lighter surface. The spec workflow is one
+                // checkbox away in Settings ▸ General.
+                Current = Current with { WorkflowFeatures = false };
+                return;
+            }
             var json = File.ReadAllText(_path);
             var loaded = JsonSerializer.Deserialize<AppSettings>(json, JsonOpts);
-            if (loaded is not null) Current = loaded;
+            if (loaded is null) return;
+            if (loaded.Shortcuts is { } sc)
+            {
+                var migrated = sc.MigrateLegacyDefaults();
+                if (migrated != sc)
+                {
+                    loaded = loaded with { Shortcuts = migrated };
+                    Current = loaded;
+                    Save();
+                    return;
+                }
+            }
+            Current = loaded;
         }
         catch { /* corrupt — use defaults */ }
     }

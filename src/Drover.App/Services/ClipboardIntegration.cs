@@ -1,28 +1,38 @@
-using System;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media.Imaging;
 using Drover.App.Terminal;
 using MsTerm = Microsoft.Terminal.Wpf;
 
 namespace Drover.App.Services;
 
 /// <summary>
-/// Wires Ctrl+C / Ctrl+V into the hosted terminal.
-/// Ctrl+C: if the terminal has a selection, copy it to the clipboard and swallow the keystroke.
-/// Otherwise let the 0x03 pass through so it still interrupts the foreground process as SIGINT
-/// (crucial for stopping Claude mid-run). Hooked via the WriteInput intercept because the WPF
-/// TerminalControl reliably emits 0x03 there.
-/// Ctrl+V: with Win32InputMode on, the WPF TerminalControl encodes Ctrl+V as an extended Win32
-/// key record and never emits a plain 0x16 byte through WriteInput, so the intercept can't see
-/// it. Hook PreviewKeyDown on the control instead, read the clipboard, and write the text
-/// directly to the PTY wrapped in bracketed-paste markers (ESC[200~ ... ESC[201~) so Claude
-/// Code's TUI treats it as a single paste event rather than a stream of Enter presses.
+/// Wires copy / paste into the hosted terminal.
+/// With Win32InputMode on (DroverTerminal injects ESC[?9001h), the WPF TerminalControl encodes
+/// every keystroke as an extended Win32 key record — plain 0x03/0x16 bytes never reach the
+/// WriteInput intercept, so both copy and paste are hooked via PreviewKeyDown instead.
+/// Ctrl+C / Ctrl+Shift+C / Ctrl+Insert: if the terminal has a selection, copy it, clear the
+/// selection and mark the event handled. Without a selection, plain Ctrl+C falls through so it
+/// still interrupts the foreground process (crucial for stopping Claude mid-run).
+/// Ctrl+V / Ctrl+Shift+V / Shift+Insert:
+///   - text  → written to the PTY wrapped in bracketed-paste markers (ESC[200~ ... ESC[201~)
+///             so Claude Code's TUI treats it as one paste rather than a stream of Enters.
+///   - image → saved as a PNG under %TEMP%\Drover\pastes and its quoted path pasted; Claude
+///             Code attaches image paths it sees in the prompt. (Claude can't read the
+///             clipboard itself here because the keystroke never reaches it.)
+///   - files copied in Explorer → their quoted paths pasted, same as drag-drop.
+/// The legacy 0x03 WriteInput intercept is kept as a fallback for input paths that bypass
+/// PreviewKeyDown or sessions without Win32 input mode.
 /// </summary>
 public sealed class ClipboardIntegration
 {
-    private const char Etx = ''; // Ctrl+C
+    private const char Etx = '\x03'; // Ctrl+C
     private const string PasteStart = "\x1b[200~";
     private const string PasteEnd = "\x1b[201~";
+    private static readonly TimeSpan PasteRetention = TimeSpan.FromDays(7);
 
     private readonly DroverTerminal _easy;
 
@@ -50,28 +60,111 @@ public sealed class ClipboardIntegration
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
-        var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        var mods = Keyboard.Modifiers;
+        var ctrl = (mods & ModifierKeys.Control) != 0;
+        var shift = (mods & ModifierKeys.Shift) != 0;
+        var alt = (mods & ModifierKeys.Alt) != 0;
+        if (alt) return;
 
-        // Ctrl+V or Shift+Insert: paste from clipboard.
-        var isPaste = (ctrl && e.Key == Key.V) || (shift && e.Key == Key.Insert);
-        if (!isPaste) return;
-
-        var text = TryGetClipboard();
-        if (string.IsNullOrEmpty(text))
+        // Ctrl+C / Ctrl+Shift+C / Ctrl+Insert with a selection: copy and swallow.
+        // Ctrl+Shift+C is swallowed even without a selection — Windows Terminal
+        // users expect it to be copy, never an interrupt.
+        var isCopy = ctrl && (e.Key == Key.C || e.Key == Key.Insert);
+        if (isCopy)
         {
-            e.Handled = true;
+            if (TryCopySelection())
+            {
+                e.Handled = true;
+                return;
+            }
+            if (shift && e.Key == Key.C) e.Handled = true;
             return;
         }
 
-        var normalized = text.Replace("\r\n", "\r").Replace("\n", "\r");
+        var isPaste = (ctrl && e.Key == Key.V) || (shift && !ctrl && e.Key == Key.Insert);
+        if (!isPaste) return;
+
+        if (TryPasteFromClipboard()) e.Handled = true;
+    }
+
+    /// <summary>Pastes whatever the clipboard holds. Returns false when there was
+    /// nothing usable, so the keystroke falls through to the session.</summary>
+    private bool TryPasteFromClipboard()
+    {
+        if (_easy.Connection is null) return false;
+
+        string? text = null;
+        string[]? files = null;
+        BitmapSource? image = null;
         try
         {
-            _easy.Connection?.WriteToTerm(PasteStart + normalized + PasteEnd);
+            _easy.Dispatcher.Invoke(() =>
+            {
+                if (Clipboard.ContainsText()) text = Clipboard.GetText();
+                else if (Clipboard.ContainsFileDropList())
+                    files = Clipboard.GetFileDropList().Cast<string>().ToArray();
+                else if (Clipboard.ContainsImage()) image = Clipboard.GetImage();
+            });
         }
-        catch { /* PTY may be torn down — swallow */ }
+        catch (Exception ex)
+        {
+            AppLog.Warn("Clipboard", $"Clipboard read failed: {ex.Message}");
+            return false;
+        }
 
-        e.Handled = true;
+        if (!string.IsNullOrEmpty(text))
+        {
+            var normalized = text.Replace("\r\n", "\r").Replace("\n", "\r");
+            try { _easy.Connection?.WriteToTerm(PasteStart + normalized + PasteEnd); }
+            catch { /* PTY may be torn down — swallow */ }
+            return true;
+        }
+
+        if (files is { Length: > 0 })
+        {
+            _easy.PastePaths(files);
+            return true;
+        }
+
+        if (image is not null && SaveImage(image) is { } path)
+        {
+            _easy.PastePaths(new[] { path });
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? SaveImage(BitmapSource image)
+    {
+        try
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "Drover", "pastes");
+            Directory.CreateDirectory(dir);
+            PruneOldPastes(dir);
+
+            var path = Path.Combine(dir, $"paste-{DateTime.Now:yyyyMMdd-HHmmss-fff}.png");
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(image));
+            using (var fs = File.Create(path)) encoder.Save(fs);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("Clipboard", $"Saving pasted image failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static void PruneOldPastes(string dir)
+    {
+        try
+        {
+            var cutoff = DateTime.Now - PasteRetention;
+            foreach (var f in Directory.EnumerateFiles(dir, "paste-*.png"))
+                if (File.GetLastWriteTime(f) < cutoff) File.Delete(f);
+        }
+        catch { /* best effort */ }
     }
 
     private bool TryCopySelection()
@@ -89,23 +182,38 @@ public sealed class ClipboardIntegration
         try
         {
             _easy.Dispatcher.Invoke(() => Clipboard.SetText(selected));
-            return true;
         }
         catch
         {
             return false;
         }
+
+        // Clear the selection like Windows Terminal does, so the next Ctrl+C
+        // interrupts instead of copying the same text again.
+        ClearSelection(_easy.Terminal);
+        return true;
     }
 
-    private string? TryGetClipboard()
+    // TerminalControl doesn't expose ClearSelection publicly; the native export
+    // takes the renderer handle held privately on its TerminalContainer.
+    private static readonly FieldInfo? ContainerField =
+        typeof(MsTerm.TerminalControl).GetField("termContainer", BindingFlags.NonPublic | BindingFlags.Instance);
+    private static FieldInfo? _terminalHandleField;
+
+    [DllImport("Microsoft.Terminal.Control.dll", CallingConvention = CallingConvention.StdCall)]
+    private static extern void TerminalClearSelection(IntPtr terminal);
+
+    private static void ClearSelection(MsTerm.TerminalControl control)
     {
         try
         {
-            return _easy.Dispatcher.Invoke(() => Clipboard.ContainsText() ? Clipboard.GetText() : null);
+            var container = ContainerField?.GetValue(control);
+            if (container is null) return;
+            _terminalHandleField ??= container.GetType()
+                .GetField("terminal", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (_terminalHandleField?.GetValue(container) is IntPtr h && h != IntPtr.Zero)
+                control.Dispatcher.Invoke(() => TerminalClearSelection(h));
         }
-        catch
-        {
-            return null;
-        }
+        catch { /* best effort — worst case the selection stays visible */ }
     }
 }

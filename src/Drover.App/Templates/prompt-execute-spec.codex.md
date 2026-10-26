@@ -13,15 +13,65 @@ verify them, and update the spec frontmatter to reflect the outcome.
    any references called out in the spec's *Approach* section.
 3. Set the spec's frontmatter `status: in-progress` before starting work.
    Do not batch this with other edits — flip status first, then implement.
-4. Implement the *Approach* and meet the *Acceptance criteria*. Honour
+4. Check the spec's agent assignment. Drover substitutes it here:
+
+   **Assigned agent:** `{{AGENT}}`
+
+   Codex has no subagent spawn, so this is not a delegation — it's extra
+   instructions to adopt inline.
+
+   - If that value is empty, or is still the literal `{{AGENT}}`
+     placeholder (Drover didn't supply it), ignore this step and proceed
+     normally.
+   - Otherwise, read `.claude/agents/{{AGENT}}.md` — the project copy
+     under `<project>/.claude/agents/` first, then `~/.claude/agents/`.
+     Treat that file's body as additional instructions for this run,
+     layered under the spec and `AGENTS.md`. Its own frontmatter
+     (`name`, `description`, `tools`, `model`) is metadata — don't try to
+     act on it.
+   - If the file isn't present under either directory, ignore the field
+     and proceed. Don't guess at a near-match, and don't attempt to spawn
+     a subagent — you have none.
+   - Either way, say in your chat summary whether you found and adopted
+     the agent file, or that it was missing.
+
+5. Implement the *Approach* and meet the *Acceptance criteria*. Honour
    every box in the *Constraints* section. Stay inside *Out of scope* —
    if a change you'd otherwise make is listed there, don't make it.
-5. After implementation, execute the *Test plan* verbatim. Run every
+6. After implementation, execute the *Test plan* verbatim. Run every
    command listed. For manual steps you cannot perform (device runs,
    external service calls, anything requiring physical hardware or
    credentials you don't have), report them honestly as not-verified
    rather than skipping or claiming success.
-6. Update the spec frontmatter:
+7. Run the verification pass. Drover substitutes the assigned reviewer
+   here:
+
+   **Verifier:** `{{VERIFY_WITH}}`
+
+   You have no independent subagent, so this cannot be an independent
+   review. Be honest about that rather than dressing up a self-check.
+
+   - If the value is empty, or is still the literal `{{VERIFY_WITH}}`
+     placeholder, skip this step. Assess the criteria as you already
+     would, and say in your chat summary that no verification pass ran.
+   - Otherwise read `.claude/agents/{{VERIFY_WITH}}.md` — the project
+     copy under `<project>/.claude/agents/` first, then
+     `~/.claude/agents/`. If it isn't present under either, skip this
+     step and say so; don't guess at a near-match.
+   - When it is present, run its checklist as an **explicit separate
+     pass** over the *Acceptance criteria*, after the implementation
+     pass is finished. Start from the criteria, the diff and the test
+     output — not from your own account of what you did. Produce a
+     per-criterion verdict: `pass`, `fail`, or `not-verified`, with a
+     one-line reason for anything that isn't `pass`.
+   - A criterion this pass finds unmet blocks the spec by the normal
+     rule in step 8, the same as any other unmet criterion. Don't fix
+     and re-check inside this run — record the finding and stop.
+   - Record in the implementation log that the verification was
+     **self-administered**, naming the agent file you followed. Never
+     write it up as an independent verification.
+
+8. Update the spec frontmatter:
    - All acceptance criteria pass (including manual steps you could
      perform) → `status: done`
    - One or more criteria block → `status: blocked` and add a short
@@ -44,8 +94,10 @@ verify them, and update the spec frontmatter to reflect the outcome.
        requires the spec itself to be edited or re-thought.
      If you genuinely cannot tell, choose `major` — stopping is the
      safer default.
-7. Report a short summary in the chat: what changed, which acceptance
-   criteria pass, which block, and any heads-ups for the user.
+9. Report a short summary in the chat: what changed, which acceptance
+   criteria pass, which block, whether an assigned agent file was
+   adopted, whether a self-administered verification pass ran, and any
+   heads-ups for the user.
 
 ## Rules
 
@@ -85,6 +137,8 @@ When `status: blocked`, append (don't replace) a section like:
 
 **Date:** YYYY-MM-DD
 **Outcome:** blocked
+**agents_used:** agent-name (adopted inline)
+**Verified by:** @reviewer-name (self-administered — Codex has no independent subagent)
 
 What was completed:
 - ...
@@ -95,6 +149,23 @@ What blocks:
 Heads-ups for follow-up:
 - ...
 ```
+
+`agents_used:` records the agent definition you adopted for this run,
+suffixed `(adopted inline)` since Codex runs it in-session rather than as
+a subagent. Write `none — main session` when there was no assignment or
+the file was missing. This log line is the durable record; Drover doesn't
+reconstruct it from hooks.
+
+`Verified by:` records the step 7 pass. Always mark it
+`(self-administered — Codex has no independent subagent)`; write
+`not verified` (with the reason: none assigned, agent file missing)
+rather than leaving the line off. Never imply an independent
+verification happened on a Codex tab.
+
+If an agent file was adopted, or a verification pass ran, write this
+section even when the outcome is `done` and you'd otherwise skip the log
+— a four-line entry with just **Date**, **Outcome**, **agents_used** and
+**Verified by** is enough.
 
 Keep it short. Three to six bullets total is fine. The user will read
 this when they pick up the spec to finish manual verification.

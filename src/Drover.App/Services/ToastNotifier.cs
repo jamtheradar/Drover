@@ -1,4 +1,3 @@
-using System;
 using Drover.App.ViewModels;
 using Microsoft.Toolkit.Uwp.Notifications;
 

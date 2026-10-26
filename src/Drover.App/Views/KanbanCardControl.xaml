@@ -163,6 +163,30 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
+                    <!-- Assigned spec ids (Agents source). Deliberately chips, not
+                         CheckBoxes: a checkbox here would look actionable and
+                         OnSubItemClicked no-ops for non-LocalFileRef cards. -->
+                    <ItemsControl ItemsSource="{Binding Badges.AssignedSpecIds}" Margin="0,4,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,4,2"
+                                        Padding="5,1"
+                                        CornerRadius="3"
+                                        Background="{StaticResource Surface.Control}">
+                                    <TextBlock Text="{Binding}"
+                                               Foreground="{StaticResource Chrome.TextMuted}"
+                                               FontFamily="Consolas, Cascadia Code, monospace"
+                                               FontSize="10" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
                     <ItemsControl ItemsSource="{Binding Gates}" Margin="0,4,0,0">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>

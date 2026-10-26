@@ -113,7 +113,7 @@ public sealed class VaultMcpInstaller
         servers.Remove(ServerName);
         servers[ServerName] = newEntry;
 
-        var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        var json = root.ToJsonString(SettingsJson.Indented);
         AtomicFile.WriteAllText(mcpPath, json);
 
         return new InstallResult(wasFresh, wasUpdated);

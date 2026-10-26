@@ -30,6 +30,14 @@ public sealed class AgentCatalog
 
     public System.Collections.Generic.IReadOnlyList<AgentDefinition> ForProject(string? projectPath)
     {
+        // The user-scope watcher can't be created while ~/.claude/agents is
+        // missing — retry on each read so a dir created after startup is
+        // picked up without restarting the app.
+        if (_userWatcher is null)
+        {
+            StartUserWatcher();
+            if (_userWatcher is not null) ScanUser();
+        }
         EnsureProjectWatcher(projectPath);
         var byName = new System.Collections.Generic.Dictionary<string, AgentDefinition>(System.StringComparer.OrdinalIgnoreCase);
         foreach (var u in _userAgents.Values) byName[u.Name] = u;

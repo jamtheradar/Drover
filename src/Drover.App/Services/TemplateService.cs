@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 
 namespace Drover.App.Services;
@@ -6,7 +6,8 @@ namespace Drover.App.Services;
 /// <summary>
 /// Lazily copies the embedded markdown templates (spec-template, prompt-enhance,
 /// prompt-promote-interrogate) into a project's <c>.drover/</c> directory on first
-/// use. Once copied the files are user-editable; Drover never re-writes them.
+/// use, plus starter subagent definitions into <c>.claude/agents/</c>. Once copied
+/// the files are user-editable; Drover never re-writes them.
 /// </summary>
 public interface ITemplateService
 {
@@ -24,7 +25,10 @@ public interface ITemplateService
 
     /// <summary>
     /// Initializes <c>.drover/</c> for a project: copies <c>spec-template.md</c> and
-    /// the two prompt files into place. Idempotent — won't overwrite existing files.
+    /// the prompt files into place, and seeds <c>.claude/agents/</c> with starter
+    /// implementer/reviewer subagents so <c>agent:</c> / <c>verify_with:</c> and the
+    /// specs panel's <em>Run with agent</em> have something to resolve against.
+    /// Idempotent — won't overwrite existing files.
     /// </summary>
     void Initialize(string projectRoot);
 }
@@ -36,8 +40,20 @@ public sealed class TemplateService : ITemplateService
     private const string SpecTemplateName = "spec-template.md";
     private const string EnhancePromptName = "prompt-enhance-template.md";
     private const string PromotePromptName = "prompt-promote-interrogate.md";
+    private const string PromoteGroupPromptName = "prompt-promote-group.md";
     private const string ExecuteSpecPromptName = "prompt-execute-spec.md";
     private const string LoopBatchPromptName = "prompt-loop-batch.md";
+    private const string PlanToTasksPromptName = "prompt-plan-to-tasks.md";
+
+    // Starter subagents. AgentCatalog discovers these by scanning
+    // <project>/.claude/agents/*.md, so the destination name is the agent's
+    // frontmatter `name:` — not the embedded resource's file name.
+    private const string ClaudeFolder = ".claude";
+    private const string AgentsFolder = "agents";
+    private const string ImplementerAgentResource = "agent-spec-implementer.md";
+    private const string ImplementerAgentName = "spec-implementer.md";
+    private const string ReviewerAgentResource = "agent-spec-reviewer.md";
+    private const string ReviewerAgentName = "spec-reviewer.md";
 
     // Resource names follow .NET's <DefaultNamespace>.<Folder>.<File> convention.
     private const string ResourcePrefix = "Drover.App.Templates.";
@@ -85,6 +101,10 @@ public sealed class TemplateService : ITemplateService
         if (!File.Exists(promotePath))
             CopyEmbedded(PromotePromptName, promotePath);
 
+        var promoteGroupPath = Path.Combine(promptsDir, PromoteGroupPromptName);
+        if (!File.Exists(promoteGroupPath))
+            CopyEmbedded(PromoteGroupPromptName, promoteGroupPath);
+
         var executePath = Path.Combine(promptsDir, ExecuteSpecPromptName);
         if (!File.Exists(executePath))
             CopyEmbedded(ExecuteSpecPromptName, executePath);
@@ -92,6 +112,31 @@ public sealed class TemplateService : ITemplateService
         var loopBatchPath = Path.Combine(promptsDir, LoopBatchPromptName);
         if (!File.Exists(loopBatchPath))
             CopyEmbedded(LoopBatchPromptName, loopBatchPath);
+
+        var planToTasksPath = Path.Combine(promptsDir, PlanToTasksPromptName);
+        if (!File.Exists(planToTasksPath))
+            CopyEmbedded(PlanToTasksPromptName, planToTasksPath);
+
+        InitializeAgents(projectRoot);
+    }
+
+    /// <summary>
+    /// Seeds <c>&lt;projectRoot&gt;/.claude/agents/</c> with the starter implementer
+    /// and reviewer subagents. Kept separate from the <c>.drover/</c> work because
+    /// this directory isn't Drover's: an existing agent of the same name is a
+    /// user's own, so it's left alone.
+    /// </summary>
+    private void InitializeAgents(string projectRoot)
+    {
+        var agentsDir = Path.Combine(projectRoot, ClaudeFolder, AgentsFolder);
+
+        var implementerPath = Path.Combine(agentsDir, ImplementerAgentName);
+        if (!File.Exists(implementerPath))
+            CopyEmbedded(ImplementerAgentResource, implementerPath);
+
+        var reviewerPath = Path.Combine(agentsDir, ReviewerAgentName);
+        if (!File.Exists(reviewerPath))
+            CopyEmbedded(ReviewerAgentResource, reviewerPath);
     }
 
     /// <summary>

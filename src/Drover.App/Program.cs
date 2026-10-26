@@ -16,7 +16,12 @@ public static class Program
             .SetLogger(AppLog.VelopackLogger)
             .Run();
 
-        var app = new App();
+        // `drover .` / Explorer "Open in Drover": if Drover is already running, hand the
+        // folder to it and exit instead of starting a second window.
+        var folder = FolderLaunch.ParseFolderArg(args);
+        if (folder is not null && FolderLaunch.TryHandOff(folder)) return 0;
+
+        var app = new App { StartupFolder = folder };
         app.InitializeComponent();
         return app.Run();
     }

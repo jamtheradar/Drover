@@ -10,8 +10,12 @@ namespace Drover.App;
 public partial class App : Application
 {
     private IHost? _host;
+    private readonly System.Threading.CancellationTokenSource _folderLaunchCts = new();
 
     public System.IServiceProvider Services => _host!.Services;
+
+    /// <summary>Folder passed on the command line (`drover .`), opened as a tab once the shell is up.</summary>
+    public string? StartupFolder { get; init; }
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -56,6 +60,7 @@ public partial class App : Application
                 services.AddSingleton<HooksGateway>();
                 services.AddSingleton<HooksInstaller>();
                 services.AddSingleton<CodexHooksInstaller>();
+                services.AddSingleton<ClaudeDefaultsInstaller>();
                 services.AddSingleton<TokenStats>();
                 services.AddSingleton<GitStatusService>();
                 services.AddSingleton<LiveTodoStore>();
@@ -72,6 +77,7 @@ public partial class App : Application
                 services.AddSingleton<ILoopConfigService>(sp => sp.GetRequiredService<LoopConfigService>());
                 services.AddSingleton<SpecsPanelViewModel>();
                 services.AddSingleton<VaultViewModel>();
+                services.AddSingleton<WorkflowPanelViewModel>();
                 services.AddSingleton<ShellViewModel>();
                 services.AddSingleton<ShellWindow>();
             })
@@ -112,6 +118,21 @@ public partial class App : Application
         // leak across projects we've never opened. User-added entries are left
         // alone.
         installer.TryUninstallGlobal();
+
+        // Move projects still on the pwsh hook forwarder to the native one before any
+        // tab (including restored ones) launches — CC reads hooks at session start.
+        if (settingsStore.Current.HooksEnabled)
+        {
+            try
+            {
+                foreach (var p in _host.Services.GetRequiredService<ProjectsCatalog>().Projects)
+                    installer.UpgradeLegacyProject(p.Path, true, settingsStore.Current.IdleHookEnabled);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Hooks", "Legacy hook upgrade failed.", ex);
+            }
+        }
 
         // Codex hooks: opportunistic user-scope install when any project is
         // configured as Codex. Codex's user-level hooks.json is the reliable
@@ -228,6 +249,21 @@ public partial class App : Application
 
         shell.Show();
 
+        // Folder hand-off: open the launch folder now, and accept folders from later
+        // `drover <path>` / Explorer launches for the life of this instance.
+        if (StartupFolder is { } startFolder)
+            shell.Dispatcher.BeginInvoke(new System.Action(() => vm.OpenFolder(startFolder)),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        FolderLaunch.StartServer(path => shell.Dispatcher.BeginInvoke(new System.Action(() =>
+        {
+            vm.OpenFolder(path);
+            shell.BringSelfForward();
+        })), _folderLaunchCts.Token);
+
+        // Keep the Explorer verb and drover.cmd pointing at this exe (path can move on update).
+        if (settingsStore.Current.ShellIntegration)
+            _ = System.Threading.Tasks.Task.Run(() => ShellIntegrationService.Apply(true));
+
         // Pop the What's New dialog once per version. Deferred so the shell has
         // painted before the modal appears.
         shell.Dispatcher.BeginInvoke(new System.Action(() => shell.ShowWhatsNewIfNeeded()),
@@ -329,6 +365,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _folderLaunchCts.Cancel();
         _host?.Dispose();
         base.OnExit(e);
     }

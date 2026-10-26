@@ -13,17 +13,79 @@ them, and update the spec frontmatter to reflect the outcome.
    section.
 3. Set the spec's frontmatter `status: in-progress` before starting work.
    Do not batch this with other edits — flip status first, then implement.
-4. Implement the *Approach* and meet the *Acceptance criteria*. Honour
+4. Check the spec's agent assignment. Drover substitutes it here:
+
+   **Assigned agent:** `{{AGENT}}`
+
+   - If that value is empty, or is still the literal `{{AGENT}}`
+     placeholder (Drover didn't supply it), there is no assignment.
+     Implement the spec yourself in this session — that's the default
+     and the common case.
+   - Otherwise, delegate the implementation to that subagent via the
+     Task tool: `Use the @{{AGENT}} subagent to: implement
+     specs/{{SPEC_FILENAME}}`. Pass the spec *path* so the subagent
+     reads the file itself; don't paraphrase or summarise the spec for
+     it.
+   - **You keep the frontmatter.** The subagent implements and reports
+     back; you write `status`, `last_run_at` and `block_severity`. Tell
+     the subagent explicitly not to touch the spec's frontmatter —
+     Drover watches for `status` leaving `in-progress`, and a subagent
+     flipping it early races the loop runner.
+   - If the named agent doesn't exist under `<project>/.claude/agents/`
+     or `~/.claude/agents/`, don't guess at a near-match and don't
+     invent one. Implement in this session as if unassigned, and say in
+     your chat summary that the assigned agent was missing.
+
+5. Implement the *Approach* and meet the *Acceptance criteria*. Honour
    every box in the *Constraints* section. Stay inside *Out of scope* —
    if a change you'd otherwise make is listed there, don't make it.
-5. After implementation, execute the *Test plan* verbatim. Run every
+6. After implementation, execute the *Test plan* verbatim. Run every
    command listed. For manual steps you cannot perform (device runs,
    external service calls, anything requiring physical hardware or
    credentials you don't have), report them honestly as not-verified
    rather than skipping or claiming success.
-6. Update the spec frontmatter:
+7. Verify with the assigned reviewer. Drover substitutes it here:
+
+   **Verifier:** `{{VERIFY_WITH}}`
+
+   - If that value is empty, or is still the literal `{{VERIFY_WITH}}`
+     placeholder, there is no verifier. Assess the criteria yourself as
+     before, and say in your chat summary that no independent
+     verification happened.
+   - If the named agent doesn't exist under `<project>/.claude/agents/`
+     or `~/.claude/agents/`, don't substitute a different reviewer and
+     don't guess at a near-match. Fall back to self-assessment and say
+     so. A missing verifier must never block a run on its own — it
+     degrades to today's behaviour, never to a stop.
+   - Otherwise spawn that subagent via the Task tool and give it:
+     - the spec path, `specs/{{SPEC_FILENAME}}`;
+     - the *Acceptance criteria* list, copied verbatim from the spec;
+     - the diff, or the list of changed files with their contents;
+     - the raw output of the *Test plan* commands.
+
+     Give it the evidence, not your account of it. A verifier reading
+     "I implemented X and it works" is worthless — it has to reach its
+     own conclusion from the criteria and the diff.
+   - Ask for a per-criterion verdict — `pass`, `fail`, or
+     `not-verified` — plus a one-line reason for anything that isn't
+     `pass`.
+   - **The verifier fixes nothing.** Tell it explicitly: no file edits,
+     no frontmatter edits, no re-running the implementation. It reports;
+     you or a later run act on the report.
+   - **Concurrence gates `done`.** You may write `status: done` only if
+     the verifier returned `pass` on every criterion. Otherwise
+     `status: blocked`, with the severity chosen by the normal rule in
+     step 8 applied to *what the verifier found*: a criterion it could
+     not check without a device or credential is `trivial`; a criterion
+     it says is genuinely unmet is `major`.
+   - Do not "just fix it and re-verify" inside this run. That turns a
+     bounded run into an unbounded one and hides the disagreement.
+     Blocked-with-a-log is the intended outcome; the user re-runs.
+
+8. Update the spec frontmatter:
    - All acceptance criteria pass (including manual steps you could
-     perform) → `status: done`
+     perform) *and* the step 7 verifier concurred, if there was one →
+     `status: done`
    - One or more criteria block → `status: blocked` and add a short
      `## Implementation log` section at the bottom of the spec
      describing what blocked and why
@@ -44,8 +106,10 @@ them, and update the spec frontmatter to reflect the outcome.
        requires the spec itself to be edited or re-thought.
      If you genuinely cannot tell, choose `major` — stopping is the
      safer default.
-7. Report a short summary in the chat: what changed, which acceptance
-   criteria pass, which block, and any heads-ups for the user.
+9. Report a short summary in the chat: what changed, which acceptance
+   criteria pass, which block, which subagents (if any) did the work,
+   whether an independent verification happened, and any heads-ups for
+   the user.
 
 ## Rules
 
@@ -84,6 +148,8 @@ When `status: blocked`, append (don't replace) a section like:
 
 **Date:** YYYY-MM-DD
 **Outcome:** blocked
+**agents_used:** agent-one, agent-two
+**Verified by:** @reviewer-name   # or "not verified — no verifier assigned"
 
 What was completed:
 - ...
@@ -94,6 +160,24 @@ What blocks:
 Heads-ups for follow-up:
 - ...
 ```
+
+`agents_used:` lists the subagents that actually did work — the one
+assigned in `agent:` plus any you chose to spawn yourself. Write `none —
+main session` when you implemented it directly. Drover deliberately does
+not reconstruct this from hooks (`RunningAgentTypes` is per-tab and
+ephemeral); this log line is the durable record.
+
+`Verified by:` records the step 7 verifier and its verdict. Where the
+verifier and you disagreed, write both positions — disagreement is
+information, not something to resolve silently in favour of either
+party. Say `not verified` (with the reason: none assigned, agent
+missing, Codex tab) rather than leaving the line off; never imply a
+verification that didn't happen.
+
+If a subagent did any of the work, or a verifier ran, write this section
+even when the outcome is `done` and you'd otherwise skip the log — a
+four-line entry with just **Date**, **Outcome**, **agents_used** and
+**Verified by** is enough.
 
 Keep it short. Three to six bullets total is fine. The user will read
 this when they pick up the spec to finish manual verification.

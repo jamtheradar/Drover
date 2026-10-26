@@ -93,7 +93,7 @@ See `Build-Release.ps1` for GitHub upload, channel, and delta-package options.
 
 ## Stack
 
-- **.NET 10** WPF, `net10.0-windows10.0.19041.0`, x64
+- **.NET 10** WPF, `net10.0-windows10.0.26100.0`, x64
 - **MVVM** via [`CommunityToolkit.Mvvm`](https://learn.microsoft.com/en-us/dotnet/communitytoolkit/mvvm/) — source-generated `[ObservableProperty]` / `[RelayCommand]`
 - **DI** via `Microsoft.Extensions.Hosting`
 - **Terminal** — `CI.Microsoft.Terminal.Wpf` + `CI.Microsoft.Windows.Console.ConPTY` (vendored wrapper at `src/EasyWindowsTerminalControl`)

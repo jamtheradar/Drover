@@ -64,6 +64,10 @@ public partial class SettingsWindow : Window
         CodexPathBox.Text = store.Current.CodexExecutablePath ?? string.Empty;
         GeminiPathBox.Text = store.Current.GeminiExecutablePath ?? string.Empty;
         StartupBox.IsChecked = store.Current.StartWithWindows && WindowsStartupService.IsEnabled();
+        ShellIntegrationBox.IsChecked = store.Current.ShellIntegration;
+        ShowTopBarBox.IsChecked = store.Current.ShowTopBar;
+        WorkflowFeaturesBox.IsChecked = store.Current.WorkflowFeatures;
+        DisableMouseClicksBox.IsChecked = store.Current.DisableClaudeMouseClicks;
 
         if (store.Current.GlobalEnvVars is { Count: > 0 })
             GlobalEnvBox.Text = string.Join(Environment.NewLine,
@@ -164,6 +168,8 @@ public partial class SettingsWindow : Window
         ScPlanPanel.Text = sc.TogglePlanPanel;
         ScTaskPanel.Text = sc.ToggleTaskPanel;
         ScFileExplorerPanel.Text = sc.ToggleFileExplorerPanel;
+        ScKanbanPanel.Text = sc.ToggleKanbanPanel;
+        ScSidebar.Text = sc.ToggleSidebar;
     }
 
     private void ResetShortcuts_Click(object sender, RoutedEventArgs e)
@@ -191,6 +197,8 @@ public partial class SettingsWindow : Window
         var codexPath = (CodexPathBox.Text ?? string.Empty).Trim();
         var geminiPath = (GeminiPathBox.Text ?? string.Empty).Trim();
         var startWithWindows = StartupBox.IsChecked == true;
+        var shellIntegration = ShellIntegrationBox.IsChecked == true;
+        var disableMouseClicks = DisableMouseClicksBox.IsChecked == true;
         var globalEnv = ParseEnv(GlobalEnvBox.Text);
         var logKeep = int.TryParse(LogKeepBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var k) && k >= 0
             ? k : _store.Current.LogKeepCount;
@@ -216,9 +224,29 @@ public partial class SettingsWindow : Window
             TogglePlanPanel: ScPlanPanel.Text.Trim(),
             ToggleTaskPanel: ScTaskPanel.Text.Trim(),
             ToggleFileExplorerPanel: ScFileExplorerPanel.Text.Trim(),
-            // Settings UI doesn't expose this binding yet; preserve whatever was loaded
-            // so saving the dialog doesn't silently reset the kanban hotkey.
-            ToggleKanbanPanel: _store.Current.Shortcuts?.ToggleKanbanPanel ?? "Alt+K");
+            ToggleKanbanPanel: ScKanbanPanel.Text.Trim(),
+            ToggleSidebar: ScSidebar.Text.Trim());
+
+        var conflicts = new[]
+            {
+                shortcuts.CommandPalette, shortcuts.CycleTabForward, shortcuts.CycleTabBackward,
+                shortcuts.RenameTab, shortcuts.FindInTab, shortcuts.GlobalFind, shortcuts.Settings,
+                shortcuts.TogglePlanPanel, shortcuts.ToggleTaskPanel, shortcuts.ToggleFileExplorerPanel,
+                shortcuts.ToggleKanbanPanel, shortcuts.ToggleSidebar,
+            }
+            .Select(GestureParser.ClaudeCodeConflict)
+            .Where(c => c is not null)
+            .Distinct()
+            .ToList();
+        if (conflicts.Count > 0)
+        {
+            var answer = MessageBox.Show(this,
+                "These Drover shortcuts will stop the key reaching Claude Code:\n\n  "
+                + string.Join("\n  ", conflicts)
+                + "\n\nSave anyway?",
+                "Shortcut conflicts", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes) return;
+        }
         _store.Update(_store.Current with
         {
             FontFamily = fam,
@@ -238,6 +266,10 @@ public partial class SettingsWindow : Window
             CodexExecutablePath = codexPath,
             GeminiExecutablePath = geminiPath,
             StartWithWindows = startWithWindows,
+            ShellIntegration = shellIntegration,
+            ShowTopBar = ShowTopBarBox.IsChecked == true,
+            WorkflowFeatures = WorkflowFeaturesBox.IsChecked == true,
+            DisableClaudeMouseClicks = disableMouseClicks,
             GlobalEnvVars = globalEnv,
             LogKeepCount = logKeep,
             LogByteBudgetMb = logBytes,
@@ -245,6 +277,7 @@ public partial class SettingsWindow : Window
         });
 
         WindowsStartupService.Apply(startWithWindows);
+        ShellIntegrationService.Apply(shellIntegration);
 
         DialogResult = true;
     }

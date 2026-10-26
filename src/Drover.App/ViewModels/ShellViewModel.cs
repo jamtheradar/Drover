@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using Drover.App.Models;
 using Drover.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -19,6 +19,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly HooksGateway _hooks;
     private readonly HooksInstaller _hooksInstaller;
     private readonly CodexHooksInstaller _codexHooksInstaller;
+    private readonly ClaudeDefaultsInstaller _claudeDefaultsInstaller;
     private readonly GitStatusService _gitStatus;
     private readonly LiveTodoStore _liveTodos;
     private readonly AgentCatalog _agents;
@@ -42,6 +43,7 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private bool _kanbanPanelVisible;
     [ObservableProperty] private bool _specsPanelVisible;
     [ObservableProperty] private bool _vaultPanelVisible;
+    [ObservableProperty] private bool _workflowPanelVisible;
     /// <summary>
     /// Pixel width of the right pane (Activity, Plan, or Tasks, whichever is open).
     /// 0 when collapsed. Bound two-way to the right column so the GridSplitter
@@ -50,7 +52,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty] private double _rightPaneWidth;
     private double _lastRightPaneOpenWidth = 380;
-    public bool RightPaneOpen => PlanPanelVisible || ActivityVisible || TaskPanelVisible || FileExplorerPanelVisible || KanbanPanelVisible || SpecsPanelVisible || VaultPanelVisible;
+    public bool RightPaneOpen => PlanPanelVisible || ActivityVisible || TaskPanelVisible || FileExplorerPanelVisible || KanbanPanelVisible || SpecsPanelVisible || VaultPanelVisible || WorkflowPanelVisible;
 
     public KanbanViewModel Kanban { get; private set; } = null!;
 
@@ -91,6 +93,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty] private bool _canMarkSelectedTaskFileDone;
     [ObservableProperty] private double _taskFontScale = 1.0;
     [ObservableProperty] private bool _taskComposerVisible;
+    // Multi-select state for the Tasks panel. The flag lives on each TaskItem
+    // (view-only, not persisted); this mirror is just the count the panel binds
+    // its selection bar to.
+    [ObservableProperty] private int _selectedTaskCount;
     [ObservableProperty] private string _taskComposerText = string.Empty;
     public ObservableCollection<Drover.App.Models.TaskFileEntry> AvailableTaskFiles { get; } = new();
     [ObservableProperty] private bool _dashboardActive;
@@ -141,7 +147,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
     partial void OnActivityVisibleChanged(bool value)
     {
-        if (value) { PlanPanelVisible = false; TaskPanelVisible = false; FileExplorerPanelVisible = false; KanbanPanelVisible = false; SpecsPanelVisible = false; VaultPanelVisible = false; }
+        if (value) { PlanPanelVisible = false; TaskPanelVisible = false; FileExplorerPanelVisible = false; KanbanPanelVisible = false; SpecsPanelVisible = false; VaultPanelVisible = false; WorkflowPanelVisible = false; }
         UpdateRightPaneWidth();
         OnPropertyChanged(nameof(RightPaneOpen));
     }
@@ -151,6 +157,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (value)
         {
             ActivityVisible = false;
+            WorkflowPanelVisible = false;
             PlanPanelVisible = false;
             TaskPanelVisible = false;
             FileExplorerPanelVisible = false;
@@ -169,6 +176,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (value)
         {
             ActivityVisible = false;
+            WorkflowPanelVisible = false;
             TaskPanelVisible = false;
             FileExplorerPanelVisible = false;
             KanbanPanelVisible = false;
@@ -189,6 +197,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (value)
         {
             ActivityVisible = false;
+            WorkflowPanelVisible = false;
             PlanPanelVisible = false;
             FileExplorerPanelVisible = false;
             KanbanPanelVisible = false;
@@ -209,6 +218,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (value)
         {
             ActivityVisible = false;
+            WorkflowPanelVisible = false;
             PlanPanelVisible = false;
             TaskPanelVisible = false;
             KanbanPanelVisible = false;
@@ -229,6 +239,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (value)
         {
             ActivityVisible = false;
+            WorkflowPanelVisible = false;
             PlanPanelVisible = false;
             TaskPanelVisible = false;
             FileExplorerPanelVisible = false;
@@ -248,6 +259,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (value)
         {
             ActivityVisible = false;
+            WorkflowPanelVisible = false;
             PlanPanelVisible = false;
             TaskPanelVisible = false;
             FileExplorerPanelVisible = false;
@@ -256,6 +268,28 @@ public sealed partial class ShellViewModel : ObservableObject
             // Bind the vault to the active project on every show so opening the
             // panel from the sidebar after switching tabs targets the right namespace.
             SyncVaultActiveProject();
+        }
+        UpdateRightPaneWidth();
+        OnPropertyChanged(nameof(RightPaneOpen));
+    }
+
+    /// <summary>
+    /// The workflow panel is the pipeline's front door: it re-scans on every
+    /// show rather than watching, because its job is to answer "what's here
+    /// and what do I do next", not to track edits live.
+    /// </summary>
+    partial void OnWorkflowPanelVisibleChanged(bool value)
+    {
+        if (value)
+        {
+            ActivityVisible = false;
+            PlanPanelVisible = false;
+            TaskPanelVisible = false;
+            FileExplorerPanelVisible = false;
+            KanbanPanelVisible = false;
+            SpecsPanelVisible = false;
+            VaultPanelVisible = false;
+            Workflow.OnTabChanged(SelectedTab);
         }
         UpdateRightPaneWidth();
         OnPropertyChanged(nameof(RightPaneOpen));
@@ -346,15 +380,30 @@ public sealed partial class ShellViewModel : ObservableObject
         if (KanbanPanelVisible) Kanban.OnTabChanged(value);
         if (SpecsPanelVisible) Specs.OnTabChanged(value);
         if (VaultPanelVisible) SyncVaultActiveProject();
+        if (WorkflowPanelVisible) Workflow.OnTabChanged(value);
 
-        // Throttle output coalescing on every other tab so background sessions
-        // can't collectively flood the UI dispatcher and lag the focused tab's
-        // keyboard echo. See ConPtyConnection.IsForeground.
+        SyncConnectionThrottles();
+    }
+
+    /// <summary>
+    /// Throttles output coalescing on every terminal that isn't currently on screen so
+    /// background sessions can't collectively flood the UI dispatcher and lag the focused
+    /// tab's keyboard echo. On screen = the selected tab, the split-view secondary tab, or
+    /// any tab popped out into its own window. See <see cref="ConPtyConnection.IsForeground"/>.
+    ///
+    /// Call this whenever the set of on-screen terminals changes — selection, split,
+    /// pop-out, re-attach — and also after a tab's PTY comes up, since a connection that
+    /// didn't exist at selection time would otherwise keep the unthrottled default.
+    /// </summary>
+    public void SyncConnectionThrottles()
+    {
         foreach (var tab in Tabs)
         {
             var pty = tab.GetCurrentConnection();
-            if (pty is not null) pty.IsForeground = ReferenceEquals(tab, value);
+            if (pty is null) continue;
+            pty.IsForeground = tab.IsPoppedOut || ReferenceEquals(tab, SelectedTab);
         }
+        if (SecondaryTab?.GetCurrentConnection() is { } sec) sec.IsForeground = true;
     }
 
     partial void OnTokenomicsActiveChanged(bool value)
@@ -374,8 +423,9 @@ public sealed partial class ShellViewModel : ObservableObject
 
     public SpecsPanelViewModel Specs { get; }
     public VaultViewModel Vault { get; }
+    public WorkflowPanelViewModel Workflow { get; }
 
-    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller, CodexHooksInstaller codexHooksInstaller, GitStatusService gitStatus, LiveTodoStore liveTodos, AgentCatalog agents, BuildStatusTracker buildTracker, GateRegistry gates, ToastNotifier toaster, TemplateService templateService, PromptLibrary promptLibrary, SpecsPanelViewModel specs, SkillsRepoCatalog skillsRepoCatalog, VaultStore vaultStore, VaultMcpInstaller vaultMcpInstaller, VaultViewModel vault)
+    public ShellViewModel(ProjectsCatalog catalog, SettingsStore settings, ActivityLog activity, HooksGateway hooks, HooksInstaller hooksInstaller, CodexHooksInstaller codexHooksInstaller, ClaudeDefaultsInstaller claudeDefaultsInstaller, GitStatusService gitStatus, LiveTodoStore liveTodos, AgentCatalog agents, BuildStatusTracker buildTracker, GateRegistry gates, ToastNotifier toaster, TemplateService templateService, PromptLibrary promptLibrary, SpecsPanelViewModel specs, SkillsRepoCatalog skillsRepoCatalog, VaultStore vaultStore, VaultMcpInstaller vaultMcpInstaller, VaultViewModel vault, WorkflowPanelViewModel workflow)
     {
         _catalog = catalog;
         _settings = settings;
@@ -383,6 +433,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _hooks = hooks;
         _hooksInstaller = hooksInstaller;
         _codexHooksInstaller = codexHooksInstaller;
+        _claudeDefaultsInstaller = claudeDefaultsInstaller;
         _gitStatus = gitStatus;
         _liveTodos = liveTodos;
         _agents = agents;
@@ -396,6 +447,16 @@ public sealed partial class ShellViewModel : ObservableObject
         _vaultMcpInstaller = vaultMcpInstaller;
         Specs = specs;
         Vault = vault;
+        Workflow = workflow;
+        // The workflow panel drives the other panels but must not hold a
+        // reference back to the shell (circular DI), so navigation and the
+        // starter-file writes are handed over as callbacks.
+        Workflow.ShowPlanPanel = () => PlanPanelVisible = true;
+        Workflow.ShowTaskPanel = () => TaskPanelVisible = true;
+        Workflow.ShowSpecsPanel = () => SpecsPanelVisible = true;
+        Workflow.CreatePlanFile = () => CreatePlanFromTemplateCommand.Execute(null);
+        Workflow.CreateTaskFile = () => CreateTaskFileFromTemplateCommand.Execute(null);
+        Workflow.InitializeSpecs = () => InitializeSpecsCommand.Execute(SelectedTab?.Project);
         Kanban = new KanbanViewModel(liveTodos, agents, gates, toaster, settings);
 
         // Seed the panel-font multiplier from persisted settings. 12pt is the
@@ -409,6 +470,29 @@ public sealed partial class ShellViewModel : ObservableObject
         var sbfs = _settings.Current.StatusBarFontSize;
         if (sbfs <= 0) sbfs = 11;
         _statusBarFontSize = System.Math.Clamp(sbfs, 9, 24);
+
+        _sidebarVisible = !_settings.Current.SidebarCollapsed;
+        _topBarVisible = _settings.Current.ShowTopBar;
+        _workflowFeaturesEnabled = _settings.Current.WorkflowFeatures;
+        _settings.Changed += (_, _) =>
+        {
+            var c = _settings.Current;
+            void Apply()
+            {
+                SidebarVisible = !c.SidebarCollapsed;
+                TopBarVisible = c.ShowTopBar;
+                WorkflowFeaturesEnabled = c.WorkflowFeatures;
+                if (!c.WorkflowFeatures)
+                {
+                    SpecsPanelVisible = false;
+                    WorkflowPanelVisible = false;
+                    KanbanPanelVisible = false;
+                }
+            }
+            var d = System.Windows.Application.Current?.Dispatcher;
+            if (d is null || d.CheckAccess()) Apply();
+            else d.BeginInvoke(new System.Action(Apply));
+        };
 
         // Pick up out-of-band edits from the Settings dialog. Marshal to the UI
         // dispatcher because Changed fires on whatever thread called Update.
@@ -486,6 +570,7 @@ public sealed partial class ShellViewModel : ObservableObject
         ToggleKanbanPanelCommand = new RelayCommand(() => KanbanPanelVisible = !KanbanPanelVisible);
         ToggleSpecsPanelCommand = new RelayCommand(() => SpecsPanelVisible = !SpecsPanelVisible);
         ToggleVaultPanelCommand = new RelayCommand(() => VaultPanelVisible = !VaultPanelVisible);
+        ToggleWorkflowPanelCommand = new RelayCommand(() => WorkflowPanelVisible = !WorkflowPanelVisible);
         RefreshFileExplorerCommand = new RelayCommand(LoadFileTreeForSelectedTab);
         RefreshTaskListCommand = new RelayCommand(LoadTaskListForSelectedTab);
         SendTaskItemCommand = new RelayCommand<Drover.App.Models.TaskItem>(SendTaskItem);
@@ -520,12 +605,30 @@ public sealed partial class ShellViewModel : ObservableObject
         EnhanceSpecTemplateCommand = new RelayCommand<ProjectDefinition>(EnhanceSpecTemplate);
         OpenDroverFolderCommand = new RelayCommand<ProjectDefinition>(OpenDroverFolder);
         PromoteInterrogateCommand = new RelayCommand<Drover.App.Models.TaskItem>(PromoteInterrogate);
+        PromoteGroupInterrogateCommand = new RelayCommand(PromoteSelectedGroup);
+        PromoteSectionInterrogateCommand = new RelayCommand<Drover.App.Models.TaskSection>(PromoteSection);
+        ToggleTaskItemSelectionCommand = new RelayCommand<Drover.App.Models.TaskItem>(ToggleTaskItemSelection);
+        ToggleTaskSectionSelectionCommand = new RelayCommand<Drover.App.Models.TaskSection>(ToggleTaskSectionSelection);
+        ClearTaskSelectionCommand = new RelayCommand(ClearTaskSelection);
+        MarkTaskItemDoneCommand = new RelayCommand<Drover.App.Models.TaskItem>(i => SetTaskItemDone(i, true));
+        MarkTaskItemNotDoneCommand = new RelayCommand<Drover.App.Models.TaskItem>(i => SetTaskItemDone(i, false));
+        MarkTaskSectionDoneCommand = new RelayCommand<Drover.App.Models.TaskSection>(sec => SetTaskSectionDone(sec, true));
+        MarkTaskSectionNotDoneCommand = new RelayCommand<Drover.App.Models.TaskSection>(sec => SetTaskSectionDone(sec, false));
     }
 
     public RelayCommand<ProjectDefinition> InitializeSpecsCommand { get; }
     public RelayCommand<ProjectDefinition> EnhanceSpecTemplateCommand { get; }
     public RelayCommand<ProjectDefinition> OpenDroverFolderCommand { get; }
     public RelayCommand<Drover.App.Models.TaskItem> PromoteInterrogateCommand { get; }
+    public RelayCommand PromoteGroupInterrogateCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskSection> PromoteSectionInterrogateCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskItem> ToggleTaskItemSelectionCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskSection> ToggleTaskSectionSelectionCommand { get; }
+    public RelayCommand ClearTaskSelectionCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskItem> MarkTaskItemDoneCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskItem> MarkTaskItemNotDoneCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskSection> MarkTaskSectionDoneCommand { get; }
+    public RelayCommand<Drover.App.Models.TaskSection> MarkTaskSectionNotDoneCommand { get; }
 
     /// <summary>
     /// First active tab whose project root matches <paramref name="projectRoot"/>
@@ -554,7 +657,7 @@ public sealed partial class ShellViewModel : ObservableObject
             StatusText = $"Initialize specs failed: {ex.Message}";
             return;
         }
-        StatusText = "Drover initialized. Edit .drover/spec-template.md or run Enhance spec template to tailor it.";
+        StatusText = "Drover initialized. Edit .drover/spec-template.md (or run Enhance spec template) and .claude/agents/spec-*.md to tailor them.";
     }
 
     private void EnhanceSpecTemplate(ProjectDefinition? project)
@@ -716,6 +819,265 @@ public sealed partial class ShellViewModel : ObservableObject
         TaskListStatusText = "Promoted: " + preview;
     }
 
+    // ─── Task multi-select ──────────────────────────────────────────────────
+    // Rows no longer send a prompt on click — that lives in the context menu
+    // only. Click now toggles selection, so several small tasks can be promoted
+    // into one spec instead of one spec per trivial line.
+
+    private System.Collections.Generic.IEnumerable<Drover.App.Models.TaskItem> AllTaskItems()
+    {
+        var doc = CurrentTaskList;
+        if (doc is null) yield break;
+        foreach (var i in doc.OrphanItems) yield return i;
+        foreach (var sec in doc.Sections)
+            foreach (var i in sec.Items) yield return i;
+    }
+
+    private void RecomputeSelectedTaskCount()
+        => SelectedTaskCount = AllTaskItems().Count(i => i.IsSelected);
+
+    private void ToggleTaskItemSelection(Drover.App.Models.TaskItem? item)
+    {
+        if (item is null) return;
+        item.IsSelected = !item.IsSelected;
+        RecomputeSelectedTaskCount();
+    }
+
+    /// <summary>
+    /// Clicking a section header selects or deselects every task under it —
+    /// the one-gesture path to "this whole section is one spec".
+    /// </summary>
+    private void ToggleTaskSectionSelection(Drover.App.Models.TaskSection? section)
+    {
+        if (section is null) return;
+        var selectAll = section.Items.Any(i => !i.IsSelected);
+        foreach (var i in section.Items) i.IsSelected = selectAll;
+        RecomputeSelectedTaskCount();
+    }
+
+    private void ClearTaskSelection()
+    {
+        foreach (var i in AllTaskItems()) i.IsSelected = false;
+        SelectedTaskCount = 0;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex TaskCheckboxRx =
+        new(@"^(\s*[-*]\s+\[)([ xX/~])(\]\s+)(.+?)(\s*)$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Flips task checkboxes in the markdown file. The file is the source of
+    /// truth, so this rewrites the lines by number and reloads — no in-memory
+    /// mutation of the parsed <see cref="Drover.App.Models.TaskItem"/>. Lines
+    /// that no longer look like the task we parsed are skipped, which is the
+    /// cheap defence against an edit landing between load and click.
+    ///
+    /// Right-clicking a row that is part of a selection acts on the whole
+    /// selection; right-clicking outside the selection acts on that row alone,
+    /// which is the usual list-view contract.
+    /// </summary>
+    private void SetTaskItemDone(Drover.App.Models.TaskItem? item, bool done)
+    {
+        if (item is null) return;
+
+        var targets = item.IsSelected
+            ? AllTaskItems().Where(i => i.IsSelected).ToList()
+            : new System.Collections.Generic.List<Drover.App.Models.TaskItem> { item };
+        if (targets.Count == 0) targets.Add(item);
+
+        SetTaskItemsDone(targets, done);
+    }
+
+    /// <summary>
+    /// Section-header equivalent of <see cref="SetTaskItemDone"/>. Selection wins
+    /// when the section has any selected tasks — so click a few rows, right-click
+    /// the heading, and only those flip. With nothing selected in the section the
+    /// whole section is the target, which is what the heading implies.
+    /// </summary>
+    private void SetTaskSectionDone(Drover.App.Models.TaskSection? section, bool done)
+    {
+        if (section is null) return;
+
+        var selected = section.Items.Where(i => i.IsSelected).ToList();
+        var targets = selected.Count > 0 ? selected : section.Items.ToList();
+        if (targets.Count == 0)
+        {
+            TaskListStatusText = "Section has no tasks.";
+            return;
+        }
+
+        SetTaskItemsDone(targets, done);
+    }
+
+    private void SetTaskItemsDone(
+        System.Collections.Generic.IReadOnlyList<Drover.App.Models.TaskItem> items,
+        bool done)
+    {
+        if (items.Count == 0 || SelectedTaskFile is null) return;
+        if (SelectedTaskFile.IsDone)
+        {
+            TaskListStatusText = "This task file is archived.";
+            return;
+        }
+
+        var path = SelectedTaskFile.AbsolutePath;
+        try
+        {
+            if (!System.IO.File.Exists(path)) return;
+            var raw = System.IO.File.ReadAllText(path);
+            if (raw.Length > 0 && raw[0] == '﻿') raw = raw.Substring(1);
+            var lines = raw.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+
+            var marker = done ? "x" : " ";
+            var changed = 0;
+            var stale = 0;
+            var alreadySet = 0;
+            Drover.App.Models.TaskItem? lastChanged = null;
+
+            foreach (var item in items)
+            {
+                var idx = item.LineNumber - 1;
+                if (idx < 0 || idx >= lines.Length) { stale++; continue; }
+
+                var m = TaskCheckboxRx.Match(lines[idx]);
+                if (!m.Success || !string.Equals(m.Groups[4].Value, item.Text, System.StringComparison.Ordinal))
+                {
+                    stale++;
+                    continue;
+                }
+
+                if (string.Equals(m.Groups[2].Value, marker, System.StringComparison.Ordinal))
+                {
+                    alreadySet++;
+                    continue;
+                }
+
+                lines[idx] = m.Groups[1].Value + marker + m.Groups[3].Value + m.Groups[4].Value + m.Groups[5].Value;
+                changed++;
+                lastChanged = item;
+            }
+
+            if (changed == 0)
+            {
+                TaskListStatusText = stale > 0
+                    ? "Task list changed — refresh and retry."
+                    : (done ? "Already complete." : "Already incomplete.");
+                return;
+            }
+
+            AtomicFile.WriteAllText(path, string.Join(System.Environment.NewLine, lines));
+            CurrentTaskList = TaskReader.ReadFile(path);
+
+            string message;
+            if (changed == 1 && lastChanged is not null)
+            {
+                var preview = lastChanged.Text.Length <= 40 ? lastChanged.Text : lastChanged.Text.Substring(0, 40) + "…";
+                message = (done ? "Completed: " : "Reopened: ") + preview;
+            }
+            else
+            {
+                message = (done ? "Completed " : "Reopened ") + changed + " tasks";
+            }
+
+            if (stale > 0) message += $" ({stale} skipped — task list changed)";
+            else if (alreadySet > 0) message += $" ({alreadySet} already {(done ? "complete" : "incomplete")})";
+
+            TaskListStatusText = message;
+        }
+        catch (System.Exception ex)
+        {
+            TaskListStatusText = "Update failed: " + ex.Message;
+        }
+    }
+
+    // Selection is view-only state on TaskItem instances, and a reload rebuilds
+    // them — so the count has to be re-derived rather than carried over.
+    partial void OnCurrentTaskListChanged(Drover.App.Models.TaskDocument? value)
+        => RecomputeSelectedTaskCount();
+
+    private void PromoteSelectedGroup()
+    {
+        var items = AllTaskItems().Where(i => i.IsSelected).ToList();
+        if (items.Count == 0)
+        {
+            TaskListStatusText = "Select one or more tasks first.";
+            return;
+        }
+        PromoteGroup(items, $"{items.Count} selected task(s) from {SelectedTaskFileRelativeOrDefault}");
+    }
+
+    private void PromoteSection(Drover.App.Models.TaskSection? section)
+    {
+        if (section is null) return;
+        if (section.Items.Count == 0)
+        {
+            TaskListStatusText = "Section has no tasks to promote.";
+            return;
+        }
+        PromoteGroup(section.Items, section.Heading);
+    }
+
+    /// <summary>
+    /// Sends the <c>promote-group</c> prompt with the selected task lines
+    /// injected verbatim, so Claude can match them back to tasks.md. One spec
+    /// per group is the whole point — the prompt is what enforces it.
+    /// </summary>
+    private void PromoteGroup(
+        System.Collections.Generic.IReadOnlyList<Drover.App.Models.TaskItem> items,
+        string groupLabel)
+    {
+        if (items.Count == 0 || SelectedTab is null) return;
+        var project = SelectedTab.Project;
+        if (string.IsNullOrEmpty(project.Path)) return;
+
+        if (!EnsureSpecsInitialized(project.Path)) return;
+
+        var lines = string.Join(
+            System.Environment.NewLine,
+            items.Select(i => string.IsNullOrEmpty(i.RawLine) ? "- [ ] " + i.Text : i.RawLine.TrimEnd()));
+
+        string prompt;
+        try
+        {
+            prompt = _promptLibrary.Resolve(
+                "promote-group",
+                project.Path,
+                new System.Collections.Generic.Dictionary<string, string>
+                {
+                    ["TASK_LINES"] = lines,
+                    ["GROUP_LABEL"] = groupLabel,
+                });
+        }
+        catch (System.Exception ex)
+        {
+            TaskListStatusText = $"Promote prompt failed: {ex.Message}";
+            return;
+        }
+
+        SelectedTab.SendInput(prompt);
+        TaskListStatusText = $"Promoted {items.Count} task(s) as one spec: {groupLabel}";
+        ClearTaskSelection();
+    }
+
+    /// <summary>
+    /// The promote prompts open by reading <c>.drover/spec-template.md</c>, which
+    /// dead-ends if the user never ran Initialize specs. Returns false (with a
+    /// status message already set) when the scaffold couldn't be created.
+    /// </summary>
+    private bool EnsureSpecsInitialized(string projectPath)
+    {
+        if (_templateService.IsInitialized(projectPath)) return true;
+        try
+        {
+            _templateService.Initialize(projectPath);
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            StatusText = $"Initialize specs failed: {ex.Message}";
+            return false;
+        }
+    }
+
     public RelayCommand<TerminalTabViewModel> OpenTabFolderCommand { get; }
 
     /// <summary>
@@ -724,6 +1086,14 @@ public sealed partial class ShellViewModel : ObservableObject
     /// 10s cadence as CC's push instead of waiting up to 15s for the next polling tick.
     /// </summary>
     public event System.EventHandler? StatusLinePushed;
+
+    // Reset time (UTC) of the 5h window currently shown in the Session pill. Used by
+    // OnTabStatusLineUpdated to reject stale pushes from idle tabs.
+    private System.DateTime? _sessionCcResetUtc;
+    // Tabs can disagree on the same window's resets_at by a few seconds (each push
+    // reflects that session's last server contact) — treat anything inside this
+    // tolerance as the same window rather than a new one.
+    private static readonly System.TimeSpan SameWindowTolerance = System.TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Aggregates Claude Code's account-wide rate-limit numbers from any tab's most-recent
@@ -745,6 +1115,24 @@ public sealed partial class ShellViewModel : ObservableObject
         // string as valid (server has anchored the window) and 0% with empty reset as "no data".
         var hasFiveHour = !string.IsNullOrEmpty(tab.CcRateLimit5hResetText) || tab.CcRateLimit5hPercent > 0;
         if (!hasFiveHour) return;
+
+        // Every tab re-pushes its *cached* rate-limit block on CC's ~10s statusLine cadence,
+        // so an idle tab keeps broadcasting numbers from its last turn and the pill flip-flops
+        // between fresh and stale values. Filter by reset window: a newer window wins outright,
+        // the same window only moves the percentage up (usage is monotonic until the reset),
+        // and an older window is ignored. Skip the filter once the adopted window has elapsed —
+        // anything is fresher than an expired window.
+        var incReset = tab.CcRateLimit5hResetUtc;
+        if (_sessionCcResetUtc is { } cur && cur > System.DateTime.UtcNow)
+        {
+            if (incReset is { } inc)
+            {
+                if (inc < cur - SameWindowTolerance) return;
+                if (inc <= cur + SameWindowTolerance && tab.CcRateLimit5hPercent < SessionPercent) return;
+            }
+            else if (tab.CcRateLimit5hPercent < SessionPercent) return;
+        }
+        _sessionCcResetUtc = incReset ?? _sessionCcResetUtc;
 
         SessionFromCc = true;
         SessionPercent = tab.CcRateLimit5hPercent;
@@ -851,6 +1239,38 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
+    /// <summary>Opens an external terminal window at the tab's project root.</summary>
+    public void OpenTabTerminal(TerminalTabViewModel? tab) => OpenTerminalAt(tab?.Project.Path);
+
+    /// <summary>
+    /// Opens an external terminal window at <paramref name="path"/>. Prefers Windows Terminal
+    /// (<c>wt.exe -d</c>); falls back to a bare pwsh / Windows PowerShell console when wt
+    /// isn't installed.
+    /// </summary>
+    public void OpenTerminalAt(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.Directory.Exists(path)) return;
+
+        var wt = new System.Diagnostics.ProcessStartInfo("wt.exe") { UseShellExecute = false, WorkingDirectory = path };
+        wt.ArgumentList.Add("-d");
+        wt.ArgumentList.Add(path);
+        if (TryStart(wt)) return;
+
+        foreach (var shell in new[] { "pwsh.exe", "powershell.exe" })
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(shell) { UseShellExecute = false, WorkingDirectory = path };
+            psi.ArgumentList.Add("-NoExit");
+            if (TryStart(psi)) return;
+        }
+        StatusText = "open terminal failed: no wt.exe, pwsh.exe or powershell.exe on PATH";
+
+        static bool TryStart(System.Diagnostics.ProcessStartInfo psi)
+        {
+            try { System.Diagnostics.Process.Start(psi)?.Dispose(); return true; }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+        }
+    }
+
     /// <summary>
     /// Installs Drover hook entries into the project's <c>.claude/settings.local.json</c>
     /// and refreshes the per-tab status flag for every tab pointing at that path.
@@ -870,6 +1290,79 @@ public sealed partial class ShellViewModel : ObservableObject
         else
         {
             StatusText = $"hook install failed for {project.Name}";
+        }
+    }
+
+    /// <summary>Tab "hook off" badge clicked. Hooks are read at session start, so say so.</summary>
+    internal void OnTabInstallHooksRequested(object? sender, System.EventArgs e)
+    {
+        if (sender is not TerminalTabViewModel tab) return;
+        InstallHookForProject(tab.Project);
+        if (_hooksInstaller.IsInstalledForProject(tab.Project.Path))
+            StatusText = $"hooks enabled for {tab.Project.Name} — they apply to new sessions (open a new tab, or /exit and relaunch)";
+    }
+
+    /// <summary>
+    /// Runs before a Claude tab launches (Claude Code reads hook config at session start):
+    /// upgrades legacy pwsh hook entries to the native forwarder, and the first time a
+    /// project without hooks is opened, offers to enable them — they're what drive the
+    /// attention flash, permission strip, live status and cost. Asked once per project.
+    /// </summary>
+    private void PrepareHooksBeforeLaunch(ProjectDefinition project)
+    {
+        if (project.Kind is not (ProjectKind.Claude or ProjectKind.ClaudeDirect)) return;
+        if (!string.IsNullOrEmpty(project.LaunchCommand) || !System.IO.Directory.Exists(project.Path)) return;
+        var s = _settings.Current;
+        if (!s.HooksEnabled) return;
+
+        if (_hooksInstaller.IsInstalledForProject(project.Path))
+        {
+            _hooksInstaller.UpgradeLegacyProject(project.Path, s.HooksEnabled, s.IdleHookEnabled);
+            return;
+        }
+
+        var asked = s.HooksPromptedProjects ?? new System.Collections.Generic.List<string>();
+        if (asked.Exists(p => string.Equals(p, project.Path, StringComparison.OrdinalIgnoreCase))) return;
+        _settings.Update(s with { HooksPromptedProjects = new System.Collections.Generic.List<string>(asked) { project.Path } });
+
+        var answer = System.Windows.MessageBox.Show(
+            $"Enable Drover hooks for {project.Name}?\n\n" +
+            "Hooks let Drover see what Claude is doing: the tab flashes when Claude finishes or needs " +
+            "permission, and the status strip shows the current tool, model and cost.\n\n" +
+            "This adds entries to .claude\\settings.local.json in the project (personal, not committed). " +
+            "They do nothing when Claude runs outside Drover. You can turn them on later from the tab's " +
+            "“hook off” badge.",
+            "Drover hooks", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.Yes);
+        if (answer == System.Windows.MessageBoxResult.Yes) InstallHookForProject(project);
+    }
+
+    /// <summary>
+    /// Creates the full default <c>.claude/settings.local.json</c> for a project:
+    /// default env + permission allow/deny lists (via <see cref="ClaudeDefaultsInstaller"/>)
+    /// plus Drover's hook entries and statusLine takeover (via <see cref="HooksInstaller"/>).
+    /// Merge-only — existing user entries are preserved. StatusLine is always
+    /// included here regardless of the global takeover setting, because the point
+    /// of this action is to produce the complete default file.
+    /// </summary>
+    public void CreateClaudeDefaultsForProject(ProjectDefinition? project)
+    {
+        if (project is null || string.IsNullOrEmpty(project.Path)) return;
+        var s = _settings.Current;
+        var defaultsOk = _claudeDefaultsInstaller.TryInstallProject(project.Path);
+        var hooksOk = _hooksInstaller.TryInstallProject(project.Path,
+            takeOverStatusLine: true,
+            hooksEnabled: true,
+            idleHookEnabled: s.IdleHookEnabled);
+        if (defaultsOk && hooksOk)
+        {
+            RefreshHooksStatusFor(project.Path);
+            StatusText = $"default .claude settings created in {project.Name}";
+        }
+        else
+        {
+            StatusText = $"creating .claude defaults failed for {project.Name}" +
+                         (defaultsOk ? " (hooks step)" : " (settings step — malformed settings.local.json?)");
         }
     }
 
@@ -895,20 +1388,45 @@ public sealed partial class ShellViewModel : ObservableObject
             StatusText = $"Codex hook install failed for {project.Name}";
     }
 
-    /// <summary>Rechecks hook-status for every distinct project across open tabs and the secondary slot.</summary>
+    /// <summary>
+    /// Rechecks hook-status for every distinct project across open tabs and the secondary
+    /// slot. Each check reads (and string-searches) up to two settings.json files, so with
+    /// several tabs open this is enough synchronous IO to show up as a hitch on the 30s
+    /// timer — the probing happens on a worker thread and only the flag assignment
+    /// marshals back.
+    /// </summary>
     public void RefreshAllHooksStatus()
     {
         var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-        foreach (var t in Tabs)
-            if (seen.Add(t.Project.Path)) RefreshHooksStatusFor(t.Project.Path);
-        if (SecondaryTab is { } sec && seen.Add(sec.Project.Path))
-            RefreshHooksStatusFor(sec.Project.Path);
+        foreach (var t in Tabs) seen.Add(t.Project.Path);
+        if (SecondaryTab is { } sec) seen.Add(sec.Project.Path);
+        if (seen.Count == 0) return;
+
+        var paths = seen.ToArray();
+        _ = System.Threading.Tasks.Task.Run(() =>
+        {
+            var results = new System.Collections.Generic.List<(string Path, bool Installed)>(paths.Length);
+            foreach (var p in paths)
+            {
+                try { results.Add((p, _hooksInstaller.IsInstalledForProject(p))); }
+                catch { /* unreadable settings.json — leave the flag as-is */ }
+            }
+
+            var app = System.Windows.Application.Current;
+            if (app is null) return;
+            app.Dispatcher.BeginInvoke(new System.Action(() =>
+            {
+                foreach (var (p, installed) in results) ApplyHooksStatus(p, installed);
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        });
     }
 
     /// <summary>Refreshes <see cref="TerminalTabViewModel.HooksInstalled"/> for every tab pointing at the given path.</summary>
     public void RefreshHooksStatusFor(string projectPath)
+        => ApplyHooksStatus(projectPath, _hooksInstaller.IsInstalledForProject(projectPath));
+
+    private void ApplyHooksStatus(string projectPath, bool installed)
     {
-        var installed = _hooksInstaller.IsInstalledForProject(projectPath);
         foreach (var t in Tabs)
             if (string.Equals(t.Project.Path, projectPath, System.StringComparison.OrdinalIgnoreCase))
                 t.HooksInstalled = installed;
@@ -1116,6 +1634,70 @@ public sealed partial class ShellViewModel : ObservableObject
 
     private void OpenProject(ProjectDefinition? project) => OpenProjectInternal(project, dangerouslySkipPermissions: false);
 
+    // ─── Layout ──────────────────────────────────────────────────────────────
+
+    /// <summary>Project sidebar shown. Toggled by the ToggleSidebar shortcut; persisted.</summary>
+    [ObservableProperty] private bool _sidebarVisible = true;
+
+    /// <summary>Top bar (brand + session-usage meter). Settings ▸ General.</summary>
+    [ObservableProperty] private bool _topBarVisible = true;
+
+    /// <summary>Spec workflow surfaces (Specs, Workflow, Kanban panels and the spec menu
+    /// entries). Off for fresh installs so new users get tabs + plan/tasks/files only.</summary>
+    [ObservableProperty] private bool _workflowFeaturesEnabled = true;
+
+    public void ToggleSidebar()
+    {
+        SidebarVisible = !SidebarVisible;
+        _settings.Update(_settings.Current with { SidebarCollapsed = !SidebarVisible });
+    }
+
+    /// <summary>
+    /// Opens a Claude tab in <paramref name="folder"/> — the target of `drover .`, Explorer's
+    /// "Open in Drover" and the sidebar's "Open folder…". An existing project with that path
+    /// is reused (and its open tab selected, if any); otherwise the folder is added to the
+    /// library as a default Claude project so it's one click away next time.
+    /// </summary>
+    public void OpenFolder(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder) || !System.IO.Directory.Exists(folder)) return;
+        var full = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(folder));
+
+        ProjectDefinition? project = null;
+        foreach (var p in _catalog.Projects)
+        {
+            string candidate;
+            try { candidate = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(p.Path)); }
+            catch { continue; }
+            if (string.Equals(candidate, full, StringComparison.OrdinalIgnoreCase)) { project = p; break; }
+        }
+
+        if (project is null)
+        {
+            var name = System.IO.Path.GetFileName(full);
+            if (string.IsNullOrEmpty(name)) name = full;
+            project = new ProjectDefinition(name, full, ProjectKind.Claude);
+            _catalog.Add(project);
+            StatusText = $"Added {name} to the project library";
+        }
+        else
+        {
+            foreach (var t in Tabs)
+            {
+                if (ReferenceEquals(t.Project, project))
+                {
+                    DashboardActive = false;
+                    TokenomicsActive = false;
+                    MemoryActive = false;
+                    SelectedTab = t;
+                    return;
+                }
+            }
+        }
+
+        OpenProject(project);
+    }
+
     /// <summary>
     /// Always opens a new tab for <paramref name="project"/> with Claude's
     /// <c>--dangerously-skip-permissions</c> flag, bypassing the existing-tab
@@ -1155,6 +1737,8 @@ public sealed partial class ShellViewModel : ObservableObject
             }
         }
 
+        PrepareHooksBeforeLaunch(project);
+
         var existing = 0;
         foreach (var t in Tabs)
             if (ReferenceEquals(t.Project, project) || t.Project.Name == project.Name) existing++;
@@ -1172,7 +1756,8 @@ public sealed partial class ShellViewModel : ObservableObject
             codexExecutablePath: s.CodexExecutablePath,
             geminiExecutablePath: s.GeminiExecutablePath,
             globalEnvVars: s.GlobalEnvVars,
-            logOptions: new SessionLogOptions(s.LogKeepCount, s.LogByteBudgetMb, s.SessionLogLevel));
+            logOptions: new SessionLogOptions(s.LogKeepCount, s.LogByteBudgetMb, s.SessionLogLevel),
+            disableClaudeMouseClicks: s.DisableClaudeMouseClicks);
         var primaryAgentKind = HookAgentKinds.FromProjectKind(project.Kind);
         if (primaryAgentKind is { } primaryAk)
         {
@@ -1185,6 +1770,7 @@ public sealed partial class ShellViewModel : ObservableObject
             _hooks.RegisterStatus(tab.SessionId, tab.OnStatusLine);
         }
         tab.StatusLineUpdated += OnTabStatusLineUpdated;
+        tab.InstallHooksRequested += OnTabInstallHooksRequested;
         tab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
         var cached = _gitStatus.Get(project.Path);
         tab.GitText = cached.ChipText;
@@ -1205,6 +1791,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _hooks.Unregister(tab.SessionId);
         _hooks.UnregisterStatus(tab.SessionId);
         tab.StatusLineUpdated -= OnTabStatusLineUpdated;
+        tab.InstallHooksRequested -= OnTabInstallHooksRequested;
         tab.Dispose();
         if (Tabs.Count > 0)
             SelectedTab = Tabs[System.Math.Min(idx, Tabs.Count - 1)];
@@ -1233,7 +1820,8 @@ public sealed partial class ShellViewModel : ObservableObject
             codexExecutablePath: s2.CodexExecutablePath,
             geminiExecutablePath: s2.GeminiExecutablePath,
             globalEnvVars: s2.GlobalEnvVars,
-            logOptions: new SessionLogOptions(s2.LogKeepCount, s2.LogByteBudgetMb));
+            logOptions: new SessionLogOptions(s2.LogKeepCount, s2.LogByteBudgetMb),
+            disableClaudeMouseClicks: s2.DisableClaudeMouseClicks);
         var secondaryAgentKind = HookAgentKinds.FromProjectKind(project.Kind);
         if (secondaryAgentKind is { } secondaryAk)
         {
@@ -1246,6 +1834,7 @@ public sealed partial class ShellViewModel : ObservableObject
             _hooks.RegisterStatus(SecondaryTab.SessionId, SecondaryTab.OnStatusLine);
         }
         SecondaryTab.StatusLineUpdated += OnTabStatusLineUpdated;
+        SecondaryTab.InstallHooksRequested += OnTabInstallHooksRequested;
         SecondaryTab.HooksInstalled = _hooksInstaller.IsInstalledForProject(project.Path);
         var cachedSec = _gitStatus.Get(project.Path);
         SecondaryTab.GitText = cachedSec.ChipText;
@@ -1260,6 +1849,7 @@ public sealed partial class ShellViewModel : ObservableObject
             _hooks.Unregister(SecondaryTab.SessionId);
             _hooks.UnregisterStatus(SecondaryTab.SessionId);
             SecondaryTab.StatusLineUpdated -= OnTabStatusLineUpdated;
+            SecondaryTab.InstallHooksRequested -= OnTabInstallHooksRequested;
         }
         SecondaryTab?.Dispose();
         SecondaryTab = null;
@@ -1294,6 +1884,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public RelayCommand ToggleKanbanPanelCommand { get; private set; } = null!;
     public RelayCommand ToggleSpecsPanelCommand { get; private set; } = null!;
     public RelayCommand ToggleVaultPanelCommand { get; private set; } = null!;
+    public RelayCommand ToggleWorkflowPanelCommand { get; private set; } = null!;
 
     // ─── Task panel commands ────────────────────────────────────────────────
     public RelayCommand ToggleTaskPanelCommand { get; private set; } = null!;

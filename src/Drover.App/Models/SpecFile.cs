@@ -59,6 +59,27 @@ public sealed class SpecFile
 
     public string Created { get; private set; } = string.Empty;
     public string Estimate { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// Subagent name from frontmatter (<c>agent:</c>), or empty when the spec
+    /// doesn't assign one. Deliberately a free string: it is <em>not</em>
+    /// validated against <c>AgentCatalog</c>, and an unknown or misspelled
+    /// name is the executing prompt's problem to report, not the runner's to
+    /// police (same posture as <see cref="Estimate"/>). Substituted into
+    /// <c>{{AGENT}}</c> by the loop runners.
+    /// </summary>
+    public string Agent { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// Reviewer name from frontmatter (<c>verify_with:</c>), or empty when the
+    /// spec names no verifier. Free string, unvalidated — same posture as
+    /// <see cref="Agent"/>. Substituted into <c>{{VERIFY_WITH}}</c>; the gate
+    /// itself ("the verifier must concur before <c>status: done</c>") lives in
+    /// the execute-spec prompt, not here. Drover's loop policy still reads
+    /// only <c>status</c> and <c>block_severity</c>.
+    /// </summary>
+    public string VerifyWith { get; private set; } = string.Empty;
+
     public string LastRunAt { get; private set; } = string.Empty;
     public BlockSeverity BlockSeverity { get; private set; } = BlockSeverity.None;
     public string RawBlockSeverity { get; private set; } = string.Empty;
@@ -82,6 +103,7 @@ public sealed class SpecFile
     public void Reload()
     {
         Id = Title = Created = Estimate = LastRunAt = RawStatus = RawBlockSeverity = string.Empty;
+        Agent = VerifyWith = string.Empty;
         Status = SpecStatus.Unknown;
         BlockSeverity = BlockSeverity.None;
         DependsOn = System.Array.Empty<string>();
@@ -113,6 +135,8 @@ public sealed class SpecFile
                 case "status":         RawStatus = value; Status = ParseStatus(value); break;
                 case "created":        Created = value; break;
                 case "estimate":       Estimate = value; break;
+                case "agent":          Agent = value; break;
+                case "verify_with":    VerifyWith = value; break;
                 case "last_run_at":    LastRunAt = value; break;
                 case "block_severity": RawBlockSeverity = value; BlockSeverity = ParseSeverity(value); break;
                 case "depends_on":     DependsOn = ParseDependsOn(value); break;

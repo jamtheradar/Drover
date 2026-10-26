@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 
 namespace Drover.App.Services;
 
@@ -56,9 +56,11 @@ public sealed class PromptLibrary : IPromptLibrary
         {
             ["enhance-template"] = "prompt-enhance-template.md",
             ["promote-interrogate"] = "prompt-promote-interrogate.md",
+            ["promote-group"] = "prompt-promote-group.md",
             ["execute-spec"] = "prompt-execute-spec.md",
             ["execute-spec.codex"] = "prompt-execute-spec.codex.md",
             ["loop-batch"] = "prompt-loop-batch.md",
+            ["plan-to-tasks"] = "prompt-plan-to-tasks.md",
         };
 
     /// <summary>

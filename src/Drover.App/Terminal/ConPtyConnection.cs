@@ -43,12 +43,14 @@ public sealed class ConPtyConnection : ITerminalConnection, IDisposable
     // tab streaming Claude output floods the dispatcher queue and delays
     // keyboard input events in every other open tab.
     //
-    // Foreground = the currently selected tab; gets the smooth ~120 fps cap.
-    // Background = any other tab; throttled to ~30 fps so N busy background
-    // sessions can't collectively starve the focused tab's input echo. Set via
-    // IsForeground from ShellViewModel.OnSelectedTabChanged.
+    // Foreground = on screen (selected tab, split secondary, or popped out); gets the
+    // smooth ~120 fps cap. Background = off screen; its renderer still parses the VT to
+    // keep scrollback correct, but nobody can see the intermediate frames, so there is no
+    // reason to pay the dispatcher hop for them. Flushing 5x less often costs nothing
+    // visually and keeps N busy background sessions from starving the focused tab's input
+    // echo. Set via IsForeground from ShellViewModel.SyncConnectionThrottles.
     private const int ForegroundCoalesceMs = 8;     // ~120 flushes/sec
-    private const int BackgroundCoalesceMs = 33;    // ~30 flushes/sec
+    private const int BackgroundCoalesceMs = 200;   // ~5 flushes/sec
     private const int CoalesceMaxChars = ReadBufferSize * 8; // 128 KB hard cap
 
     // Read on the worker thread, written from the UI thread.

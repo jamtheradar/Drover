@@ -427,3 +427,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Side-by-side verify builds (dotnet build -p:BaseOutputPath=bin-verify/)
+bin-verify*/

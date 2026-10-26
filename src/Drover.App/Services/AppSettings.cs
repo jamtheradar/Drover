@@ -60,6 +60,12 @@ public sealed record AppSettings(
     // KEY=VALUE pairs injected into every Claude/pwsh launch ahead of per-project
     // env. Useful for ANTHROPIC_API_KEY, NO_COLOR, proxy vars, etc.
     Dictionary<string, string>? GlobalEnvVars = null,
+    // Sets CLAUDE_CODE_DISABLE_MOUSE_CLICKS=1 on Claude tabs so CC's fullscreen TUI
+    // ignores mouse clicks (wheel scrolling still works). On by default — our lazy
+    // ConPTY redraws mean a click can land on a stale option list and select the
+    // wrong answer. Only meaningful alongside CLAUDE_CODE_NO_FLICKER (fullscreen
+    // rendering); the classic renderer never captures the mouse.
+    bool DisableClaudeMouseClicks = true,
     // Session-log retention. SessionLogger prunes oldest files when either limit
     // is exceeded. 0 = no count cap; 0 MB = no byte cap.
     int LogKeepCount = 50,
@@ -71,6 +77,18 @@ public sealed record AppSettings(
     // When true, registers a HKCU\...\Run entry pointing at this exe so Drover
     // launches at sign-in. The toggle writes the registry on Save.
     bool StartWithWindows = false,
+    // Explorer "Open in Drover" verb + a `drover` command on PATH. Re-applied on each
+    // launch while on so the registered exe path survives updates. See ShellIntegrationService.
+    bool ShellIntegration = false,
+    // Project paths already asked "enable Drover hooks?" on first open — ask once only.
+    List<string>? HooksPromptedProjects = null,
+    // Layout. SidebarCollapsed follows the ToggleSidebar shortcut. ShowTopBar hides the
+    // brand/session-usage strip. WorkflowFeatures gates the spec pipeline UI (Specs,
+    // Workflow, Kanban panels, spec menu entries): true here so existing installs keep
+    // it, but SettingsStore turns it off for a brand-new install.
+    bool SidebarCollapsed = false,
+    bool ShowTopBar = true,
+    bool WorkflowFeatures = true,
     // Last kanban source the user picked: "Local" | "Live" | "Agents". Defaults
     // to Local; introduced in v0.5 with the kanban board.
     string? KanbanLastSource = null,
@@ -93,15 +111,40 @@ public sealed record AppSettings(
     // cost, panel-zoom, and right-side status text.
     int StatusBarFontSize = 13);
 
+// Defaults stay off every key Claude Code uses: Drover's own shortcuts live on
+// Ctrl+Shift+letter (Windows Terminal / VS Code convention), plus F-keys and
+// Ctrl+Tab / Ctrl+1..9. Bare Ctrl+letter and Alt+letter belong to the session.
 public sealed record KeyboardShortcuts(
     string CommandPalette = "Ctrl+Shift+P",
     string CycleTabForward = "Ctrl+Tab",
     string CycleTabBackward = "Ctrl+Shift+Tab",
     string RenameTab = "F2",
-    string FindInTab = "Ctrl+F",
-    string GlobalFind = "Ctrl+Shift+F",
+    string FindInTab = "Ctrl+Shift+F",
+    string GlobalFind = "Ctrl+Shift+G",
     string Settings = "Ctrl+OemComma",
-    string TogglePlanPanel = "Alt+P",
+    string TogglePlanPanel = "Ctrl+Shift+L",
     string ToggleTaskPanel = "Ctrl+Shift+T",
-    string ToggleFileExplorerPanel = "Alt+E",
-    string ToggleKanbanPanel = "Alt+K");
+    string ToggleFileExplorerPanel = "Ctrl+Shift+E",
+    string ToggleKanbanPanel = "Ctrl+Shift+K",
+    string ToggleSidebar = "Ctrl+Shift+B")
+{
+    /// <summary>
+    /// Moves bindings still on a pre-0.8 default that shadowed a Claude Code key
+    /// (Alt+P model picker, Ctrl+F, Alt+E/K) onto the new defaults. Bindings the
+    /// user customised are left alone.
+    /// </summary>
+    public KeyboardShortcuts MigrateLegacyDefaults()
+    {
+        var d = new KeyboardShortcuts();
+        var next = this;
+        if (FindInTab == "Ctrl+F")
+        {
+            next = next with { FindInTab = d.FindInTab };
+            if (GlobalFind == "Ctrl+Shift+F") next = next with { GlobalFind = d.GlobalFind };
+        }
+        if (TogglePlanPanel == "Alt+P") next = next with { TogglePlanPanel = d.TogglePlanPanel };
+        if (ToggleFileExplorerPanel == "Alt+E") next = next with { ToggleFileExplorerPanel = d.ToggleFileExplorerPanel };
+        if (ToggleKanbanPanel == "Alt+K") next = next with { ToggleKanbanPanel = d.ToggleKanbanPanel };
+        return next;
+    }
+}
